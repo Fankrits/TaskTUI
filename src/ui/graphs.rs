@@ -284,8 +284,9 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
         let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
         let rank_num = format!("#{} ", idx + 1);
 
-        let proc_name = if p.name.len() > 14 {
-            format!("{}…", &p.name[..13])
+        let proc_name = if p.name.chars().count() > 14 {
+            let prefix: String = p.name.chars().take(13).collect();
+            format!("{}…", prefix)
         } else {
             p.name.clone()
         };
@@ -345,8 +346,9 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
         let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
         let rank_num = format!("#{} ", idx + 1);
 
-        let proc_name = if p.name.len() > 14 {
-            format!("{}…", &p.name[..13])
+        let proc_name = if p.name.chars().count() > 14 {
+            let prefix: String = p.name.chars().take(13).collect();
+            format!("{}…", prefix)
         } else {
             p.name.clone()
         };

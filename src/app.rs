@@ -578,16 +578,32 @@ impl App {
         format!("{} ({})", col_name, dir_str)
     }
 
-    pub fn get_top_cpu_processes(&self, count: usize) -> Vec<ProcessInfo> {
-        let mut list = self.monitor.processes.clone();
-        list.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
-        list.into_iter().take(count).collect()
+    pub fn get_top_cpu_processes(&self, count: usize) -> Vec<&ProcessInfo> {
+        let mut list: Vec<&ProcessInfo> = self.monitor.processes.iter().collect();
+        if list.len() > count {
+            list.select_nth_unstable_by(count, |a, b| {
+                b.cpu_usage
+                    .partial_cmp(&a.cpu_usage)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            list.truncate(count);
+        }
+        list.sort_by(|a, b| {
+            b.cpu_usage
+                .partial_cmp(&a.cpu_usage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        list
     }
 
-    pub fn get_top_memory_processes(&self, count: usize) -> Vec<ProcessInfo> {
-        let mut list = self.monitor.processes.clone();
+    pub fn get_top_memory_processes(&self, count: usize) -> Vec<&ProcessInfo> {
+        let mut list: Vec<&ProcessInfo> = self.monitor.processes.iter().collect();
+        if list.len() > count {
+            list.select_nth_unstable_by(count, |a, b| b.memory_bytes.cmp(&a.memory_bytes));
+            list.truncate(count);
+        }
         list.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
-        list.into_iter().take(count).collect()
+        list
     }
 
     pub fn set_sort(&mut self, col: SortColumn) {
@@ -632,5 +648,107 @@ impl App {
             SortDirection::Ascending => "Low → High ▲",
         };
         self.add_toast(format!("Ports sorted by: {} ({})", col_name, dir_str), ToastKind::Info);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_process(pid: u32, name: &str, cpu_usage: f32, memory_bytes: u64) -> ProcessInfo {
+        ProcessInfo {
+            pid,
+            name: name.to_string(),
+            cpu_usage,
+            memory_bytes,
+            memory_percent: 0.0,
+            virtual_memory_bytes: 0,
+            status: "Running".to_string(),
+            user: "test_user".to_string(),
+            session_id: None,
+            ports: Vec::new(),
+            exe_path: String::new(),
+            cmd: String::new(),
+            start_time: 0,
+            run_time_secs: 0,
+            disk_read_bytes: 0,
+            disk_written_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn test_get_top_cpu_processes_ordering_and_limit() {
+        let mut app = App::new();
+        app.monitor.processes = vec![
+            create_test_process(1, "proc1", 10.5, 1000),
+            create_test_process(2, "proc2", 85.0, 2000),
+            create_test_process(3, "proc3", 2.0, 3000),
+            create_test_process(4, "proc4", 99.1, 4000),
+            create_test_process(5, "proc5", 45.3, 5000),
+            create_test_process(6, "proc6", 0.0, 6000),
+        ];
+
+        let top = app.get_top_cpu_processes(3);
+        assert_eq!(top.len(), 3);
+        assert_eq!(top[0].pid, 4);
+        assert_eq!(top[0].cpu_usage, 99.1);
+        assert_eq!(top[1].pid, 2);
+        assert_eq!(top[1].cpu_usage, 85.0);
+        assert_eq!(top[2].pid, 5);
+        assert_eq!(top[2].cpu_usage, 45.3);
+
+        // Verify returning all when count > len
+        let top_all = app.get_top_cpu_processes(10);
+        assert_eq!(top_all.len(), 6);
+        assert_eq!(top_all[0].pid, 4);
+        assert_eq!(top_all[5].pid, 6);
+
+        // Verify count = 0
+        let top_none = app.get_top_cpu_processes(0);
+        assert_eq!(top_none.len(), 0);
+    }
+
+    #[test]
+    fn test_get_top_memory_processes_ordering_and_limit() {
+        let mut app = App::new();
+        app.monitor.processes = vec![
+            create_test_process(1, "proc1", 10.0, 10_000_000),
+            create_test_process(2, "proc2", 20.0, 85_000_000),
+            create_test_process(3, "proc3", 30.0, 2_000_000),
+            create_test_process(4, "proc4", 40.0, 99_000_000),
+            create_test_process(5, "proc5", 50.0, 45_000_000),
+            create_test_process(6, "proc6", 60.0, 500_000),
+        ];
+
+        let top = app.get_top_memory_processes(3);
+        assert_eq!(top.len(), 3);
+        assert_eq!(top[0].pid, 4);
+        assert_eq!(top[0].memory_bytes, 99_000_000);
+        assert_eq!(top[1].pid, 2);
+        assert_eq!(top[1].memory_bytes, 85_000_000);
+        assert_eq!(top[2].pid, 5);
+        assert_eq!(top[2].memory_bytes, 45_000_000);
+
+        // Verify returning all when count > len
+        let top_all = app.get_top_memory_processes(10);
+        assert_eq!(top_all.len(), 6);
+        assert_eq!(top_all[0].pid, 4);
+        assert_eq!(top_all[5].pid, 6);
+
+        // Verify count = 0
+        let top_none = app.get_top_memory_processes(0);
+        assert_eq!(top_none.len(), 0);
+    }
+
+    #[test]
+    fn test_get_top_processes_empty_list() {
+        let mut app = App::new();
+        app.monitor.processes.clear();
+
+        let top_cpu = app.get_top_cpu_processes(5);
+        assert!(top_cpu.is_empty());
+
+        let top_mem = app.get_top_memory_processes(5);
+        assert!(top_mem.is_empty());
     }
 }
