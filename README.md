@@ -70,22 +70,54 @@
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Installation & Getting Started
 
-### Installation
+### ⚡ 1-Line Quick Install (macOS, Linux & Windows)
+
+The easiest way to install TaskTUI globally on any machine with **zero dependencies** (no Rust or Node.js required):
+
+#### 🍏 macOS & 🐧 Linux (via `curl`):
+```bash
+curl -fsSL https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.sh | sh
+```
+
+#### 🪟 Windows (via `PowerShell`):
+```powershell
+irm https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.ps1 | iex
+```
+
+Once installed, simply run anywhere in your terminal:
+```bash
+tasktui
+```
+*(or `task_tui`)*
+
+---
+
+### 📦 Alternative Installation Methods
+
+#### 🍺 Homebrew (macOS / Linux)
+```bash
+brew install Fankrits/tap/tasktui
+```
+
+#### 🦀 Cargo (from Crates.io)
+If you have the Rust toolchain installed:
+```bash
+cargo install tasktui
+```
+
+#### 🔨 Build from Source
 ```bash
 # Clone the repository
 git clone https://github.com/Fankrits/TaskTUI.git
 cd TaskTUI
 
-# Build and run
+# Build and run locally
 cargo run --release
-```
 
-### Install Globally
-```bash
+# Or install binary locally to Cargo bin path
 cargo install --path .
-task_tui
 ```
 
 ---
