@@ -1,4 +1,4 @@
-use crate::app::{App, NetworkSortColumn, SortDirection};
+use crate::app::{App, NetworkSortColumn, SortDirection, visible_window};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -126,20 +126,31 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
             .style(Style::default().bg(theme.table_header_bg))
             .height(1);
 
-        let rows = app
-            .filtered_sockets
+        // Only materialise the rows that fit on screen (see process_table).
+        let total = app.filtered_sockets.len();
+        let visible = chunks[1].height.saturating_sub(3) as usize; // borders + header
+        let window = visible_window(
+            total,
+            app.selected_net_idx,
+            visible,
+            &mut app.net_view_offset,
+        );
+        let window_start = window.start;
+
+        let sockets = &app.monitor.sockets;
+        let rows = app.filtered_sockets[window]
             .iter()
             .enumerate()
-            .map(|(idx, &sock_idx)| {
-                let s = &app.monitor.sockets[sock_idx];
-                let is_even = idx % 2 == 0;
+            .filter_map(|(offset_idx, &sock_idx)| {
+                let s = sockets.get(sock_idx)?;
+                let is_even = (window_start + offset_idx) % 2 == 0;
                 let row_bg = if is_even {
                     Color::Rgb(15, 23, 42)
                 } else {
                     Color::Rgb(20, 30, 55)
                 };
 
-                let state_color = match s.state.as_str() {
+                let state_color = match s.state {
                     "LISTEN" => theme.success,
                     "ESTABLISHED" => theme.primary,
                     "TIME_WAIT" | "CLOSE_WAIT" => theme.warning,
@@ -171,11 +182,11 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
                             .add_modifier(Modifier::BOLD),
                     )),
                     Cell::from(Span::styled(
-                        &s.protocol,
+                        s.protocol,
                         Style::default().fg(theme.secondary),
                     )),
                     Cell::from(Span::styled(
-                        &s.state,
+                        s.state,
                         Style::default()
                             .fg(state_color)
                             .add_modifier(Modifier::BOLD),
@@ -192,13 +203,13 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
                     )),
                 ];
 
-                Row::new(cells).style(Style::default().bg(row_bg)).height(1)
+                Some(Row::new(cells).style(Style::default().bg(row_bg)).height(1))
             });
 
         let table_title = format!(
             " Port Sockets [ Total: {} │ Matching: {} ] ",
-            app.monitor.sockets.len(),
-            app.filtered_sockets.len()
+            sockets.len(),
+            total
         );
 
         let table = Table::new(
@@ -233,6 +244,13 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
+
+        app.network_table_state.select(if total == 0 {
+            None
+        } else {
+            Some(app.selected_net_idx.saturating_sub(window_start))
+        });
+        *app.network_table_state.offset_mut() = 0;
 
         f.render_stateful_widget(table, chunks[1], &mut app.network_table_state);
     }

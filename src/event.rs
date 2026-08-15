@@ -179,13 +179,13 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Process Details / Inspector
         KeyCode::Enter | KeyCode::Char('d') => {
             if app.active_tab == Tab::Processes {
-                if let Some(proc) = app.get_selected_process() {
-                    app.active_modal = Modal::ProcessDetails(proc.pid);
+                if let Some(pid) = app.get_selected_process().map(|p| p.pid) {
+                    app.open_process_details(pid);
                 }
             } else if app.active_tab == Tab::NetworkPorts
                 && let Some(&pid) = app.get_selected_socket().and_then(|s| s.pids.first())
             {
-                app.active_modal = Modal::ProcessDetails(pid);
+                app.open_process_details(pid);
             }
         }
 
@@ -296,11 +296,9 @@ fn get_modal_bounds(
 }
 
 fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
-    let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
-    let x = mouse.column;
-    let y = mouse.row;
-
-    // 1. Mouse Scroll Wheel
+    // 1. Mouse Scroll Wheel. Handled before querying the terminal size, since
+    //    motion/drag events arrive in a continuous stream while the mouse is
+    //    moving and each `terminal::size()` call costs an ioctl.
     match mouse.kind {
         MouseEventKind::ScrollUp => {
             app.prev_row();
@@ -310,8 +308,14 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
             app.next_row();
             return true;
         }
-        _ => {}
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Down(MouseButton::Right) => {}
+        // Moves, drags and button releases change nothing on screen.
+        _ => return false,
     }
+
+    let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
+    let x = mouse.column;
+    let y = mouse.row;
 
     // 2. Right Click -> Trigger Kill Confirmation on clicked row
     if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
@@ -515,16 +519,17 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
             let row_offset = (y - 16) as usize;
             match app.active_tab {
                 Tab::Processes => {
-                    let target_idx = app.process_table_state.offset() + row_offset;
+                    let target_idx = app.proc_view_offset + row_offset;
                     if target_idx < app.filtered_processes.len() {
                         if app.selected_proc_idx == target_idx {
                             // Clicked already selected process -> open details inspector!
-                            if let Some(proc) = app
+                            let pid = app
                                 .filtered_processes
                                 .get(target_idx)
                                 .and_then(|&idx| app.monitor.processes.get(idx))
-                            {
-                                app.active_modal = Modal::ProcessDetails(proc.pid);
+                                .map(|p| p.pid);
+                            if let Some(pid) = pid {
+                                app.open_process_details(pid);
                             }
                         } else {
                             app.selected_proc_idx = target_idx;
@@ -534,16 +539,17 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     }
                 }
                 Tab::NetworkPorts => {
-                    let target_idx = app.network_table_state.offset() + row_offset;
+                    let target_idx = app.net_view_offset + row_offset;
                     if target_idx < app.filtered_sockets.len() {
                         if app.selected_net_idx == target_idx {
-                            if let Some(&pid) = app
+                            let pid = app
                                 .filtered_sockets
                                 .get(target_idx)
                                 .and_then(|&idx| app.monitor.sockets.get(idx))
                                 .and_then(|s| s.pids.first())
-                            {
-                                app.active_modal = Modal::ProcessDetails(pid);
+                                .copied();
+                            if let Some(pid) = pid {
+                                app.open_process_details(pid);
                             }
                         } else {
                             app.selected_net_idx = target_idx;

@@ -3,6 +3,69 @@ use crate::theme::Theme;
 use ratatui::widgets::TableState;
 use std::time::{Duration, Instant};
 
+/// Case-insensitive substring test that allocates nothing.
+///
+/// `needle` must already be lowercase. Matching is ASCII-case-insensitive,
+/// which is what the previous `to_lowercase().contains()` did for the ASCII
+/// text (ports, PIDs, addresses, process names) this is used on.
+pub fn contains_ci(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() {
+        return false;
+    }
+    h.windows(n.len())
+        .any(|w| w.iter().zip(n).all(|(a, b)| a.to_ascii_lowercase() == *b))
+}
+
+/// Substring test against a number's decimal form without allocating a String.
+pub fn number_contains(value: u64, needle: &str) -> bool {
+    let mut buf = [0u8; 20];
+    let mut i = buf.len();
+    let mut v = value;
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    // Digits are ASCII, so a plain substring search is enough.
+    let s = std::str::from_utf8(&buf[i..]).unwrap_or("");
+    s.contains(needle)
+}
+
+/// Compute the visible slice of a scrolling list, keeping `selected` on screen.
+///
+/// Returns the row range to actually build widgets for, so a 600-row table only
+/// materialises the ~40 rows the terminal can display.
+pub fn visible_window(
+    total: usize,
+    selected: usize,
+    visible: usize,
+    offset: &mut usize,
+) -> std::ops::Range<usize> {
+    if total == 0 || visible == 0 {
+        *offset = 0;
+        return 0..0;
+    }
+    let max_offset = total.saturating_sub(visible);
+    if selected < *offset {
+        *offset = selected;
+    } else if selected >= *offset + visible {
+        *offset = selected + 1 - visible;
+    }
+    if *offset > max_offset {
+        *offset = max_offset;
+    }
+    let start = *offset;
+    start..(start + visible).min(total)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Processes = 0,
@@ -129,6 +192,9 @@ pub struct App {
     pub filtered_processes: Vec<usize>,
     pub top_cpu_indices: Vec<usize>,
     pub top_mem_indices: Vec<usize>,
+    /// First visible row of the process table; owned here so both the renderer
+    /// and mouse hit-testing agree on what is on screen.
+    pub proc_view_offset: usize,
 
     // Network Table State
     pub network_table_state: TableState,
@@ -139,6 +205,8 @@ pub struct App {
     pub net_search_active: bool,
     pub filtered_sockets: Vec<usize>,
     pub listening_only: bool,
+    /// First visible row of the network table.
+    pub net_view_offset: usize,
 
     // State & Modals
     pub active_modal: Modal,
@@ -147,6 +215,10 @@ pub struct App {
     pub paused: bool,
     pub tick_rate: Duration,
     pub should_quit: bool,
+
+    /// Reusable scratch buffers so the per-tick hot paths allocate nothing.
+    rank_scratch: Vec<usize>,
+    query_scratch: String,
 }
 
 impl App {
@@ -166,6 +238,7 @@ impl App {
             filtered_processes: Vec::new(),
             top_cpu_indices: Vec::new(),
             top_mem_indices: Vec::new(),
+            proc_view_offset: 0,
 
             network_table_state: TableState::default(),
             selected_net_idx: 0,
@@ -175,6 +248,7 @@ impl App {
             net_search_active: false,
             filtered_sockets: Vec::new(),
             listening_only: false,
+            net_view_offset: 0,
 
             active_modal: Modal::None,
             dashboard_view: DashboardView::Combined,
@@ -182,6 +256,8 @@ impl App {
             paused: false,
             tick_rate: Duration::from_millis(1000),
             should_quit: false,
+            rank_scratch: Vec::new(),
+            query_scratch: String::new(),
         };
 
         app.apply_process_filter_and_sort();
@@ -198,21 +274,54 @@ impl App {
 
     pub fn switch_tab(&mut self, tab: Tab) {
         let previous = self.active_tab;
+        if previous == tab {
+            return;
+        }
         self.active_tab = tab;
-        if self.active_tab == Tab::NetworkPorts && previous != Tab::NetworkPorts {
-            self.monitor.refresh_sockets();
-            self.apply_network_filter_and_sort();
+
+        // The Help tab shows no live data, so ticks skip refreshing entirely
+        // while it is open. Catch up immediately on the way out.
+        if previous == Tab::Help && !self.paused {
+            self.monitor.refresh();
+            self.update_top_rankings();
+        }
+
+        match tab {
+            Tab::NetworkPorts => {
+                self.monitor.refresh_sockets();
+                self.apply_network_filter_and_sort();
+            }
+            // Filtering/sorting is skipped on ticks while another tab is up,
+            // so rebuild the view before showing the table again.
+            Tab::Processes => self.apply_process_filter_and_sort(),
+            _ => {}
         }
     }
 
     pub fn on_tick(&mut self) {
-        if !self.paused {
+        // Nothing on the Help tab is driven by live data, so skip the whole
+        // sampling pass while it is open.
+        if !self.paused && self.active_tab != Tab::Help {
             let prev_socket_refresh = self.monitor.last_socket_refresh;
             self.monitor.refresh();
-            self.apply_process_filter_and_sort();
+
+            // Only the visible table needs re-filtering; the dashboard
+            // rankings are drawn on every non-Help tab.
+            if self.active_tab == Tab::Processes {
+                self.apply_process_filter_and_sort();
+            }
             self.update_top_rankings();
-            if self.monitor.last_socket_refresh != prev_socket_refresh {
+
+            if self.monitor.last_socket_refresh != prev_socket_refresh
+                && self.active_tab == Tab::NetworkPorts
+            {
                 self.apply_network_filter_and_sort();
+            }
+
+            // Disk I/O is sampled only for the process on screen in the
+            // inspector, not for every process on the system.
+            if let Modal::ProcessDetails(pid) = self.active_modal {
+                self.monitor.refresh_process_disk_usage(pid);
             }
         }
 
@@ -220,6 +329,31 @@ impl App {
         let now = Instant::now();
         self.toasts
             .retain(|t| now.duration_since(t.timestamp) < t.duration);
+    }
+
+    /// Lowercase the given query into the reusable scratch buffer, returning it
+    /// so callers can borrow `self` immutably while matching.
+    fn take_lowercased_query(&mut self, source_is_net: bool) -> String {
+        let mut buf = std::mem::take(&mut self.query_scratch);
+        buf.clear();
+        let src = if source_is_net {
+            &self.net_search_query
+        } else {
+            &self.search_query
+        };
+        for c in src.trim().chars() {
+            for lc in c.to_lowercase() {
+                buf.push(lc);
+            }
+        }
+        buf
+    }
+
+    /// Open the process inspector, priming the metrics that are only sampled
+    /// while a process is actually being looked at.
+    pub fn open_process_details(&mut self, pid: u32) {
+        self.monitor.refresh_process_disk_usage(pid);
+        self.active_modal = Modal::ProcessDetails(pid);
     }
 
     pub fn add_toast(&mut self, message: String, kind: ToastKind) {
@@ -232,20 +366,23 @@ impl App {
     }
 
     pub fn apply_process_filter_and_sort(&mut self) {
-        let query = self.search_query.to_lowercase().trim().to_string();
+        let query = self.take_lowercased_query(false);
         self.filtered_processes.clear();
 
         for (idx, p) in self.monitor.processes.iter().enumerate() {
             if query.is_empty()
-                || p.name.to_lowercase().contains(&query)
-                || p.pid.to_string().contains(&query)
-                || p.user.to_lowercase().contains(&query)
-                || p.ports.iter().any(|port| port.to_string().contains(&query))
-                || p.cmd.to_lowercase().contains(&query)
+                || p.name_lower.contains(&query)
+                || number_contains(p.pid as u64, &query)
+                || p.user_lower.contains(&query)
+                || p.ports
+                    .iter()
+                    .any(|port| number_contains(*port as u64, &query))
+                || p.cmd_lower.contains(&query)
             {
                 self.filtered_processes.push(idx);
             }
         }
+        self.query_scratch = query;
 
         let procs = &self.monitor.processes;
         let dir = self.sort_direction;
@@ -254,15 +391,11 @@ impl App {
                 SortDirection::Ascending => procs[a].pid.cmp(&procs[b].pid),
                 SortDirection::Descending => procs[b].pid.cmp(&procs[a].pid),
             }),
+            // Compares the pre-lowercased cache, so sorting by name no longer
+            // allocates two Strings per comparison.
             SortColumn::Name => self.filtered_processes.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => procs[a]
-                    .name
-                    .to_lowercase()
-                    .cmp(&procs[b].name.to_lowercase()),
-                SortDirection::Descending => procs[b]
-                    .name
-                    .to_lowercase()
-                    .cmp(&procs[a].name.to_lowercase()),
+                SortDirection::Ascending => procs[a].name_lower.cmp(&procs[b].name_lower),
+                SortDirection::Descending => procs[b].name_lower.cmp(&procs[a].name_lower),
             }),
             SortColumn::Cpu => self.filtered_processes.sort_by(|&a, &b| match dir {
                 SortDirection::Ascending => procs[a]
@@ -287,14 +420,8 @@ impl App {
                 }
             }),
             SortColumn::User => self.filtered_processes.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => procs[a]
-                    .user
-                    .to_lowercase()
-                    .cmp(&procs[b].user.to_lowercase()),
-                SortDirection::Descending => procs[b]
-                    .user
-                    .to_lowercase()
-                    .cmp(&procs[a].user.to_lowercase()),
+                SortDirection::Ascending => procs[a].user_lower.cmp(&procs[b].user_lower),
+                SortDirection::Descending => procs[b].user_lower.cmp(&procs[a].user_lower),
             }),
             SortColumn::Status => self.filtered_processes.sort_by(|&a, &b| match dir {
                 SortDirection::Ascending => procs[a].status.cmp(procs[b].status),
@@ -315,7 +442,7 @@ impl App {
     }
 
     pub fn apply_network_filter_and_sort(&mut self) {
-        let query = self.net_search_query.to_lowercase().trim().to_string();
+        let query = self.take_lowercased_query(true);
         let listening_only = self.listening_only;
         self.filtered_sockets.clear();
 
@@ -324,19 +451,18 @@ impl App {
                 continue;
             }
             if query.is_empty()
-                || s.local_port.to_string().contains(&query)
-                || s.protocol.to_lowercase().contains(&query)
-                || s.state.to_lowercase().contains(&query)
-                || s.local_addr.to_lowercase().contains(&query)
-                || s.remote_addr.to_lowercase().contains(&query)
-                || s.pids.iter().any(|p| p.to_string().contains(&query))
-                || s.process_names
-                    .iter()
-                    .any(|n| n.to_lowercase().contains(&query))
+                || number_contains(s.local_port as u64, &query)
+                || contains_ci(s.protocol, &query)
+                || contains_ci(s.state, &query)
+                || contains_ci(&s.local_addr, &query)
+                || contains_ci(&s.remote_addr, &query)
+                || s.pids.iter().any(|p| number_contains(*p as u64, &query))
+                || s.process_names.iter().any(|n| contains_ci(n, &query))
             {
                 self.filtered_sockets.push(idx);
             }
         }
+        self.query_scratch = query;
 
         let socks = &self.monitor.sockets;
         let dir = self.net_sort_direction;
@@ -346,12 +472,12 @@ impl App {
                 SortDirection::Descending => socks[b].local_port.cmp(&socks[a].local_port),
             }),
             NetworkSortColumn::Protocol => self.filtered_sockets.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => socks[a].protocol.cmp(&socks[b].protocol),
-                SortDirection::Descending => socks[b].protocol.cmp(&socks[a].protocol),
+                SortDirection::Ascending => socks[a].protocol.cmp(socks[b].protocol),
+                SortDirection::Descending => socks[b].protocol.cmp(socks[a].protocol),
             }),
             NetworkSortColumn::State => self.filtered_sockets.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => socks[a].state.cmp(&socks[b].state),
-                SortDirection::Descending => socks[b].state.cmp(&socks[a].state),
+                SortDirection::Ascending => socks[a].state.cmp(socks[b].state),
+                SortDirection::Descending => socks[b].state.cmp(socks[a].state),
             }),
             NetworkSortColumn::Pid => self.filtered_sockets.sort_by(|&a, &b| {
                 let a_pid = socks[a].pids.first().copied().unwrap_or(0);
@@ -390,36 +516,46 @@ impl App {
         }
     }
 
+    /// Recompute the top-5 CPU and memory rankings.
+    ///
+    /// Uses a single scratch buffer that is reused across ticks, so this
+    /// allocates nothing once the process count has settled.
     pub fn update_top_rankings(&mut self) {
-        let mut cpu_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
-        if cpu_indices.len() > 5 {
-            cpu_indices.select_nth_unstable_by(5, |&a, &b| {
-                self.monitor.processes[b]
+        let procs = &self.monitor.processes;
+        let scratch = &mut self.rank_scratch;
+        let len = procs.len();
+
+        scratch.clear();
+        scratch.extend(0..len);
+        if len > 5 {
+            scratch.select_nth_unstable_by(5, |&a, &b| {
+                procs[b]
                     .cpu_usage
-                    .partial_cmp(&self.monitor.processes[a].cpu_usage)
+                    .partial_cmp(&procs[a].cpu_usage)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
-            cpu_indices.truncate(5);
+            scratch.truncate(5);
         }
-        cpu_indices.sort_by(|&a, &b| {
-            self.monitor.processes[b]
+        scratch.sort_by(|&a, &b| {
+            procs[b]
                 .cpu_usage
-                .partial_cmp(&self.monitor.processes[a].cpu_usage)
+                .partial_cmp(&procs[a].cpu_usage)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        self.top_cpu_indices = cpu_indices;
+        self.top_cpu_indices.clear();
+        self.top_cpu_indices.extend_from_slice(scratch);
 
-        let mut mem_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
-        if mem_indices.len() > 5 {
-            mem_indices.select_nth_unstable_by(5, |&a, &b| {
-                self.monitor.processes[b]
-                    .memory_bytes
-                    .cmp(&self.monitor.processes[a].memory_bytes)
+        scratch.clear();
+        scratch.extend(0..len);
+        if len > 5 {
+            scratch.select_nth_unstable_by(5, |&a, &b| {
+                procs[b].memory_bytes.cmp(&procs[a].memory_bytes)
             });
-            mem_indices.truncate(5);
+            scratch.truncate(5);
         }
-        mem_indices.sort_by_key(|&b| std::cmp::Reverse(self.monitor.processes[b].memory_bytes));
-        self.top_mem_indices = mem_indices;
+        scratch.sort_by_key(|&b| std::cmp::Reverse(procs[b].memory_bytes));
+        self.top_mem_indices.clear();
+        self.top_mem_indices.extend_from_slice(scratch);
     }
 
     pub fn next_row(&mut self) {
@@ -704,24 +840,77 @@ mod tests {
     use super::*;
 
     fn create_test_process(pid: u32, name: &str, cpu_usage: f32, memory_bytes: u64) -> ProcessInfo {
-        ProcessInfo {
+        let mut p = ProcessInfo::new(
             pid,
-            name: name.to_string(),
-            cpu_usage,
-            memory_bytes,
-            memory_percent: 0.0,
-            virtual_memory_bytes: 0,
-            status: "Run",
-            user: "test_user".to_string(),
-            session_id: None,
-            ports: Vec::new(),
-            exe_path: String::new(),
-            cmd: String::new(),
-            start_time: 0,
-            run_time_secs: 0,
-            disk_read_bytes: 0,
-            disk_written_bytes: 0,
+            name.to_string(),
+            "test_user".to_string(),
+            String::new(),
+        );
+        p.cpu_usage = cpu_usage;
+        p.memory_bytes = memory_bytes;
+        p.status = "Run";
+        p
+    }
+
+    #[test]
+    fn test_visible_window_tracks_selection() {
+        // Fresh view starts at the top.
+        let mut offset = 0;
+        assert_eq!(visible_window(100, 0, 10, &mut offset), 0..10);
+        assert_eq!(offset, 0);
+
+        // Moving below the window scrolls it down just far enough.
+        assert_eq!(visible_window(100, 15, 10, &mut offset), 6..16);
+        assert_eq!(offset, 6);
+
+        // Moving above the window scrolls back up.
+        assert_eq!(visible_window(100, 3, 10, &mut offset), 3..13);
+        assert_eq!(offset, 3);
+
+        // Selecting the final row clamps to the end of the list.
+        assert_eq!(visible_window(100, 99, 10, &mut offset), 90..100);
+
+        // A list shorter than the viewport is shown in full.
+        let mut short = 5;
+        assert_eq!(visible_window(4, 0, 10, &mut short), 0..4);
+        assert_eq!(short, 0);
+
+        // Degenerate cases stay in range.
+        let mut empty = 7;
+        assert_eq!(visible_window(0, 0, 10, &mut empty), 0..0);
+        assert_eq!(empty, 0);
+        let mut no_room = 3;
+        assert_eq!(visible_window(50, 10, 0, &mut no_room), 0..0);
+    }
+
+    #[test]
+    fn test_number_contains_matches_string_form() {
+        assert!(number_contains(1234, "23"));
+        assert!(number_contains(1234, "1234"));
+        assert!(number_contains(0, "0"));
+        assert!(number_contains(8080, "80"));
+        assert!(!number_contains(1234, "56"));
+        assert!(number_contains(42, ""));
+        // Matches what `value.to_string().contains(..)` would have returned.
+        for v in [0u64, 7, 99, 1234, u32::MAX as u64] {
+            for needle in ["0", "1", "9", "23", "456"] {
+                assert_eq!(
+                    number_contains(v, needle),
+                    v.to_string().contains(needle),
+                    "mismatch for {v} / {needle}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn test_contains_ci_is_case_insensitive() {
+        assert!(contains_ci("LISTEN", "listen"));
+        assert!(contains_ci("ESTABLISHED", "stab"));
+        assert!(contains_ci("TCP", "tcp"));
+        assert!(!contains_ci("UDP", "tcp"));
+        assert!(contains_ci("anything", ""));
+        assert!(!contains_ci("ab", "abc"));
     }
 
     #[test]
@@ -882,29 +1071,29 @@ mod tests {
         let mut app = App::new();
         app.monitor.sockets = vec![
             NetworkSocketItem {
-                protocol: "TCP".to_string(),
+                protocol: "TCP",
                 local_addr: "127.0.0.1".to_string(),
                 local_port: 8080,
                 remote_addr: "0.0.0.0".to_string(),
-                state: "LISTEN".to_string(),
+                state: "LISTEN",
                 pids: vec![101],
                 process_names: vec!["web".to_string()],
             },
             NetworkSocketItem {
-                protocol: "TCP".to_string(),
+                protocol: "TCP",
                 local_addr: "127.0.0.1".to_string(),
                 local_port: 3000,
                 remote_addr: "0.0.0.0".to_string(),
-                state: "LISTEN".to_string(),
+                state: "LISTEN",
                 pids: vec![102],
                 process_names: vec!["node".to_string()],
             },
             NetworkSocketItem {
-                protocol: "UDP".to_string(),
+                protocol: "UDP",
                 local_addr: "0.0.0.0".to_string(),
                 local_port: 53,
                 remote_addr: "0.0.0.0".to_string(),
-                state: "NONE".to_string(),
+                state: "NONE",
                 pids: vec![103],
                 process_names: vec!["dns".to_string()],
             },

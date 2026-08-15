@@ -1,4 +1,4 @@
-use crate::app::{App, SortColumn, SortDirection};
+use crate::app::{App, SortColumn, SortDirection, visible_window};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -144,12 +144,26 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
             .height(1)
             .bottom_margin(0);
 
-        let rows = app
-            .filtered_processes
+        // Only build widgets for rows the terminal can actually show. A
+        // 600-process list otherwise materialises 600 Rows (and every Cell,
+        // Line and Span inside them) on each frame just to draw ~40 of them.
+        let total = app.filtered_processes.len();
+        let visible = chunks[1].height.saturating_sub(3) as usize; // borders + header
+        let window = visible_window(
+            total,
+            app.selected_proc_idx,
+            visible,
+            &mut app.proc_view_offset,
+        );
+        let window_start = window.start;
+
+        let procs = &app.monitor.processes;
+        let rows = app.filtered_processes[window]
             .iter()
             .enumerate()
-            .map(|(display_idx, &real_idx)| {
-                let p = &app.monitor.processes[real_idx];
+            .filter_map(|(offset_idx, &real_idx)| {
+                let p = procs.get(real_idx)?;
+                let display_idx = window_start + offset_idx;
                 let is_even = display_idx % 2 == 0;
                 let row_bg = if is_even {
                     Color::Rgb(15, 23, 42)
@@ -221,18 +235,20 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
                     Cell::from(Span::styled(&p.cmd, Style::default().fg(theme.fg_dim))),
                 ];
 
-                Row::new(cells).style(Style::default().bg(row_bg)).height(1)
+                Some(Row::new(cells).style(Style::default().bg(row_bg)).height(1))
             });
 
         let selected_pid_str = app
-            .get_selected_process()
+            .filtered_processes
+            .get(app.selected_proc_idx)
+            .and_then(|&idx| procs.get(idx))
             .map(|p| format!(" │ Selected PID: {} ({})", p.pid, p.name))
             .unwrap_or_default();
 
         let table_title = format!(
             " Tasks [ Total: {} │ Matching: {}{} ] ",
-            app.monitor.processes.len(),
-            app.filtered_processes.len(),
+            procs.len(),
+            total,
             selected_pid_str
         );
 
@@ -270,6 +286,15 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
+
+        // The window above is already scrolled, so the widget's own state just
+        // points at the selected row's position inside that window.
+        app.process_table_state.select(if total == 0 {
+            None
+        } else {
+            Some(app.selected_proc_idx.saturating_sub(window_start))
+        });
+        *app.process_table_state.offset_mut() = 0;
 
         f.render_stateful_widget(table, chunks[1], &mut app.process_table_state);
     }
