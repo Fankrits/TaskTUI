@@ -114,15 +114,8 @@ fn render_cpu_box(f: &mut Frame, app: &App, area: Rect) {
         .unfilled_symbol("─");
     f.render_widget(cpu_gauge, cpu_chunks[1]);
 
-    let cpu_data: Vec<u64> = app
-        .monitor
-        .cpu_history
-        .iter()
-        .map(|&v| v.round() as u64)
-        .collect();
-
     let sparkline = Sparkline::default()
-        .data(&cpu_data)
+        .data(&app.monitor.cpu_history)
         .max(100)
         .style(Style::default().fg(cpu_color));
     f.render_widget(sparkline, cpu_chunks[2]);
@@ -179,15 +172,8 @@ fn render_memory_box(f: &mut Frame, app: &App, area: Rect) {
         .unfilled_symbol("─");
     f.render_widget(mem_gauge, mem_chunks[1]);
 
-    let mem_data: Vec<u64> = app
-        .monitor
-        .mem_history
-        .iter()
-        .map(|&v| v.round() as u64)
-        .collect();
-
     let sparkline = Sparkline::default()
-        .data(&mem_data)
+        .data(&app.monitor.mem_history)
         .max(100)
         .style(Style::default().fg(theme.sparkline_mem));
     f.render_widget(sparkline, mem_chunks[2]);
@@ -230,28 +216,16 @@ fn render_network_box(f: &mut Frame, app: &App, area: Rect) {
     ]);
     f.render_widget(Paragraph::new(net_info), net_chunks[0]);
 
-    let rx_data: Vec<u64> = app
-        .monitor
-        .net_rx_history
-        .iter()
-        .map(|&v| v.round() as u64)
-        .collect();
-    let max_rx = rx_data.iter().copied().max().unwrap_or(10).max(10);
+    let max_rx = app.monitor.net_rx_history.iter().copied().max().unwrap_or(10).max(10);
     let rx_sparkline = Sparkline::default()
-        .data(&rx_data)
+        .data(&app.monitor.net_rx_history)
         .max(max_rx)
         .style(Style::default().fg(theme.success));
     f.render_widget(rx_sparkline, net_chunks[1]);
 
-    let tx_data: Vec<u64> = app
-        .monitor
-        .net_tx_history
-        .iter()
-        .map(|&v| v.round() as u64)
-        .collect();
-    let max_tx = tx_data.iter().copied().max().unwrap_or(10).max(10);
+    let max_tx = app.monitor.net_tx_history.iter().copied().max().unwrap_or(10).max(10);
     let tx_sparkline = Sparkline::default()
-        .data(&tx_data)
+        .data(&app.monitor.net_tx_history)
         .max(max_tx)
         .style(Style::default().fg(theme.secondary));
     f.render_widget(tx_sparkline, net_chunks[2]);

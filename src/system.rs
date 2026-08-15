@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::time::Instant;
 use sysinfo::{
     CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
@@ -8,7 +8,7 @@ use netstat2::{
     get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
 };
 
-const HISTORY_LEN: usize = 60;
+pub const HISTORY_LEN: usize = 60;
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -80,10 +80,10 @@ pub struct SystemMonitor {
     pub per_core_cpu: Vec<f32>,
 
     // Historical Ring Buffers for charts
-    pub cpu_history: VecDeque<f64>,
-    pub mem_history: VecDeque<f64>,
-    pub net_rx_history: VecDeque<f64>,
-    pub net_tx_history: VecDeque<f64>,
+    pub cpu_history: [u64; HISTORY_LEN],
+    pub mem_history: [u64; HISTORY_LEN],
+    pub net_rx_history: [u64; HISTORY_LEN],
+    pub net_tx_history: [u64; HISTORY_LEN],
 
     // Network / Disk live rate counters
     pub last_net_rx: u64,
@@ -168,10 +168,10 @@ impl SystemMonitor {
             used_swap: 0,
             global_cpu: 0.0,
             per_core_cpu: Vec::new(),
-            cpu_history: VecDeque::from(vec![0.0; HISTORY_LEN]),
-            mem_history: VecDeque::from(vec![0.0; HISTORY_LEN]),
-            net_rx_history: VecDeque::from(vec![0.0; HISTORY_LEN]),
-            net_tx_history: VecDeque::from(vec![0.0; HISTORY_LEN]),
+            cpu_history: [0; HISTORY_LEN],
+            mem_history: [0; HISTORY_LEN],
+            net_rx_history: [0; HISTORY_LEN],
+            net_tx_history: [0; HISTORY_LEN],
             last_net_rx: 0,
             last_net_tx: 0,
             current_net_rx_rate: 0.0,
@@ -219,23 +219,19 @@ impl SystemMonitor {
 
         self.per_core_cpu = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
 
-        // Update history ring buffers
-        let cpu_val = self.global_cpu.clamp(0.0, 100.0) as f64;
+        // Shift and push to fixed arrays
+        let cpu_val = (self.global_cpu.clamp(0.0, 100.0)).round() as u64;
         let mem_val = if self.total_memory > 0 {
-            (self.used_memory as f64 / self.total_memory as f64 * 100.0).clamp(0.0, 100.0)
+            ((self.used_memory as f64 / self.total_memory as f64 * 100.0).clamp(0.0, 100.0)).round() as u64
         } else {
-            0.0
+            0
         };
 
-        if self.cpu_history.len() >= HISTORY_LEN {
-            self.cpu_history.pop_front();
-        }
-        self.cpu_history.push_back(cpu_val);
+        self.cpu_history.rotate_left(1);
+        self.cpu_history[HISTORY_LEN - 1] = cpu_val;
 
-        if self.mem_history.len() >= HISTORY_LEN {
-            self.mem_history.pop_front();
-        }
-        self.mem_history.push_back(mem_val);
+        self.mem_history.rotate_left(1);
+        self.mem_history[HISTORY_LEN - 1] = mem_val;
 
         // Network rates
         let mut total_rx: u64 = 0;
@@ -254,15 +250,14 @@ impl SystemMonitor {
         self.last_net_rx = total_rx;
         self.last_net_tx = total_tx;
 
-        if self.net_rx_history.len() >= HISTORY_LEN {
-            self.net_rx_history.pop_front();
-        }
-        self.net_rx_history.push_back(self.current_net_rx_rate / 1024.0); // KB/s
+        let rx_kb = (self.current_net_rx_rate / 1024.0).round() as u64;
+        let tx_kb = (self.current_net_tx_rate / 1024.0).round() as u64;
 
-        if self.net_tx_history.len() >= HISTORY_LEN {
-            self.net_tx_history.pop_front();
-        }
-        self.net_tx_history.push_back(self.current_net_tx_rate / 1024.0); // KB/s
+        self.net_rx_history.rotate_left(1);
+        self.net_rx_history[HISTORY_LEN - 1] = rx_kb;
+
+        self.net_tx_history.rotate_left(1);
+        self.net_tx_history[HISTORY_LEN - 1] = tx_kb;
 
         // Map listening / active ports to PIDs - throttled to every 3 seconds
         if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3) || self.sockets.is_empty() {
@@ -555,6 +550,19 @@ impl SystemMonitor {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn test_array_history_buffers() {
+        let mut monitor = SystemMonitor::new();
+        assert_eq!(monitor.cpu_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.mem_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.net_rx_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.net_tx_history.len(), HISTORY_LEN);
+
+        monitor.refresh();
+        assert!(monitor.cpu_history[HISTORY_LEN - 1] <= 100);
+        assert!(monitor.mem_history[HISTORY_LEN - 1] <= 100);
+    }
 
     #[test]
     fn test_system_monitor_initialization() {
