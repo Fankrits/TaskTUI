@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 use sysinfo::{
-    Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users,
+    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
+    RefreshKind, System, UpdateKind, Users,
 };
 use netstat2::{
     get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
@@ -18,7 +19,7 @@ pub struct ProcessInfo {
     pub memory_bytes: u64,
     pub memory_percent: f32,
     pub virtual_memory_bytes: u64,
-    pub status: String,
+    pub status: &'static str,
     pub user: String,
     pub session_id: Option<u32>,
     pub ports: Vec<u16>,
@@ -96,9 +97,34 @@ pub struct SystemMonitor {
 }
 
 impl SystemMonitor {
+    pub fn map_status(status: sysinfo::ProcessStatus) -> &'static str {
+        match status {
+            sysinfo::ProcessStatus::Run => "Run",
+            sysinfo::ProcessStatus::Sleep => "Sleep",
+            sysinfo::ProcessStatus::Idle => "Idle",
+            sysinfo::ProcessStatus::Zombie => "Zombie",
+            sysinfo::ProcessStatus::Dead => "Dead",
+            sysinfo::ProcessStatus::Stop => "Stop",
+            _ => "Other",
+        }
+    }
+
     pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        let refresh_kind = RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything())
+            .with_processes(
+                ProcessRefreshKind::nothing()
+                    .with_cpu()
+                    .with_memory()
+                    .with_disk_usage()
+                    .with_exe(UpdateKind::OnlyIfNotSet)
+                    .with_cmd(UpdateKind::OnlyIfNotSet)
+                    .with_user(UpdateKind::OnlyIfNotSet)
+                    .without_tasks()
+                    .without_environ(),
+            );
+        let sys = System::new_with_specifics(refresh_kind);
 
         let users = Users::new_with_refreshed_list();
         let disks = Disks::new_with_refreshed_list();
@@ -173,7 +199,11 @@ impl SystemMonitor {
                 .with_cpu()
                 .with_memory()
                 .with_disk_usage()
-                .with_user(UpdateKind::OnlyIfNotSet),
+                .with_exe(UpdateKind::OnlyIfNotSet)
+                .with_cmd(UpdateKind::OnlyIfNotSet)
+                .with_user(UpdateKind::OnlyIfNotSet)
+                .without_tasks()
+                .without_environ(),
         );
         self.networks.refresh(true);
 
@@ -257,7 +287,7 @@ impl SystemMonitor {
                 0.0
             };
 
-            let status_str = format!("{:?}", process.status());
+            let status_str = Self::map_status(process.status());
             let user = match process.user_id() {
                 Some(uid) => {
                     if let Some(cached_user) = self.user_cache.get(uid) {
@@ -283,12 +313,16 @@ impl SystemMonitor {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
 
-            let cmd = process
-                .cmd()
-                .iter()
-                .map(|s| s.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" ");
+            let cmd = if process.cmd().is_empty() {
+                String::new()
+            } else {
+                process
+                    .cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
 
             let start_time = process.start_time();
             let run_time_secs = system_uptime.saturating_sub(start_time);
@@ -604,6 +638,15 @@ mod tests {
         for disk in &disks {
             assert!(!disk.mount_point.is_empty() || !disk.name.is_empty());
         }
+    }
+
+    #[test]
+    fn test_status_mapping_static_str() {
+        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Run), "Run");
+        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Sleep), "Sleep");
+        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Idle), "Idle");
+        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Zombie), "Zombie");
+        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Dead), "Dead");
     }
 }
 

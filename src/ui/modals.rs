@@ -141,7 +141,7 @@ fn render_process_details(f: &mut Frame, app: &App, pid: u32) {
             ]),
             Line::from(vec![
                 Span::styled(" Status:        ", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)),
-                Span::styled(&p.status, Style::default().fg(theme.status_color(&p.status))),
+                Span::styled(p.status, Style::default().fg(theme.status_color(p.status))),
                 Span::styled("   User: ", Style::default().fg(theme.fg_dim)),
                 Span::styled(&p.user, Style::default().fg(theme.fg)),
                 Span::styled("   Session: ", Style::default().fg(theme.fg_dim)),

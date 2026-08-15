@@ -180,7 +180,7 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
                 )),
                 Cell::from(Span::styled(
                     status_icon,
-                    Style::default().fg(theme.status_color(&p.status)),
+                    Style::default().fg(theme.status_color(p.status)),
                 )),
                 Cell::from(Span::styled(user_sess, Style::default().fg(theme.fg_dim))),
                 Cell::from(Span::styled(

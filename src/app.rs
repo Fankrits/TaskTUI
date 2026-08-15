@@ -289,8 +289,8 @@ impl App {
             }
             SortColumn::Status => {
                 list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.status.cmp(&b.status),
-                    SortDirection::Descending => b.status.cmp(&a.status),
+                    SortDirection::Ascending => a.status.cmp(b.status),
+                    SortDirection::Descending => b.status.cmp(a.status),
                 });
             }
         }
@@ -654,7 +654,7 @@ mod tests {
             memory_bytes,
             memory_percent: 0.0,
             virtual_memory_bytes: 0,
-            status: "Running".to_string(),
+            status: "Run",
             user: "test_user".to_string(),
             session_id: None,
             ports: Vec::new(),
