@@ -37,18 +37,28 @@ fn main() -> Result<(), anyhow::Error> {
     let mut app = App::new();
 
     let mut last_tick = Instant::now();
+    let mut needs_redraw = true;
 
     // Main App Loop
     while !app.should_quit {
-        terminal.draw(|f| ui::render(f, &mut app))?;
+        if needs_redraw {
+            terminal.draw(|f| ui::render(f, &mut app))?;
+            needs_redraw = false;
+        }
 
-        // Handle key and mouse events
-        event::handle_events(&mut app)?;
+        // Calculate exact remaining time until next tick
+        let timeout = app.tick_rate.saturating_sub(last_tick.elapsed());
+        if crossterm::event::poll(timeout)? {
+            if event::handle_events(&mut app)? {
+                needs_redraw = true;
+            }
+        }
 
         // Tick update timer
         if last_tick.elapsed() >= app.tick_rate {
             app.on_tick();
             last_tick = Instant::now();
+            needs_redraw = true;
         }
     }
 
