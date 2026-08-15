@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 use sysinfo::{
-    Disks, Networks, System, Users,
+    Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users,
 };
 use netstat2::{
     get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
@@ -57,6 +57,8 @@ pub struct SystemMonitor {
     pub disks: Disks,
     pub networks: Networks,
     pub last_refresh: Instant,
+    pub last_disk_refresh: Instant,
+    pub user_cache: HashMap<sysinfo::Uid, String>,
     
     // System static info
     pub host_name: String,
@@ -114,12 +116,16 @@ impl SystemMonitor {
         let total_memory = sys.total_memory();
         let total_swap = sys.total_swap();
 
+        let now = Instant::now();
+
         let mut monitor = Self {
             sys,
             users,
             disks,
             networks,
-            last_refresh: Instant::now(),
+            last_refresh: now,
+            last_disk_refresh: now,
+            user_cache: HashMap::new(),
             host_name,
             os_name,
             os_version,
@@ -153,9 +159,25 @@ impl SystemMonitor {
         let elapsed = now.duration_since(self.last_refresh).as_secs_f64().max(0.1);
         self.last_refresh = now;
 
-        self.sys.refresh_all();
+        // Targeted CPU & Memory Refresh
+        self.sys.refresh_cpu_all();
+        self.sys.refresh_memory();
+        self.sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing()
+                .with_cpu()
+                .with_memory()
+                .with_disk_usage()
+                .with_user(UpdateKind::OnlyIfNotSet),
+        );
         self.networks.refresh(true);
-        self.disks.refresh(true);
+
+        // Only refresh disks every 15 seconds or when needed
+        if self.last_disk_refresh.elapsed() >= std::time::Duration::from_secs(15) {
+            self.disks.refresh(true);
+            self.last_disk_refresh = now;
+        }
 
         self.used_memory = self.sys.used_memory();
         self.used_swap = self.sys.used_swap();
@@ -212,16 +234,6 @@ impl SystemMonitor {
         let (pid_to_ports, socket_list) = Self::collect_sockets();
         self.sockets = socket_list;
 
-        // Process user mapping
-        let mut pid_user_map: HashMap<u32, String> = HashMap::new();
-        for (pid, process) in self.sys.processes() {
-            if let Some(uid) = process.user_id() {
-                if let Some(user) = self.users.get_user_by_id(uid) {
-                    pid_user_map.insert(pid.as_u32(), user.name().to_string());
-                }
-            }
-        }
-
         let system_uptime = System::uptime();
 
         let mut proc_list: Vec<ProcessInfo> = Vec::with_capacity(self.sys.processes().len());
@@ -238,10 +250,23 @@ impl SystemMonitor {
             };
 
             let status_str = format!("{:?}", process.status());
-            let user = pid_user_map
-                .get(&pid_u32)
-                .cloned()
-                .unwrap_or_else(|| "-".to_string());
+            let user = match process.user_id() {
+                Some(uid) => {
+                    if let Some(cached_user) = self.user_cache.get(uid) {
+                        cached_user.clone()
+                    } else {
+                        let user_name = self
+                            .users
+                            .get_user_by_id(uid)
+                            .map(|u| u.name().to_string())
+                            .unwrap_or_else(|| "-".to_string());
+                        self.user_cache.insert(uid.clone(), user_name.clone());
+                        user_name
+                    }
+                }
+                None => "-".to_string(),
+            };
+
             let session_id = process.session_id().map(|s| s.as_u32());
             let ports = pid_to_ports.get(&pid_u32).cloned().unwrap_or_default();
 
@@ -456,3 +481,69 @@ impl SystemMonitor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_system_monitor_initialization() {
+        let monitor = SystemMonitor::new();
+        assert!(!monitor.cpu_brand.is_empty() || monitor.cpu_core_count > 0);
+        assert_eq!(monitor.cpu_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.mem_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.net_rx_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.net_tx_history.len(), HISTORY_LEN);
+    }
+
+    #[test]
+    fn test_system_monitor_refresh_updates_metrics() {
+        let mut monitor = SystemMonitor::new();
+        let initial_last_refresh = monitor.last_refresh;
+
+        std::thread::sleep(Duration::from_millis(10));
+        monitor.refresh();
+
+        assert!(monitor.last_refresh >= initial_last_refresh);
+        assert_eq!(monitor.cpu_history.len(), HISTORY_LEN);
+        assert_eq!(monitor.mem_history.len(), HISTORY_LEN);
+    }
+
+    #[test]
+    fn test_user_cache_populated_and_persisted() {
+        let mut monitor = SystemMonitor::new();
+        monitor.refresh();
+
+        let initial_cache_count = monitor.user_cache.len();
+        monitor.refresh();
+        assert!(monitor.user_cache.len() >= initial_cache_count);
+    }
+
+    #[test]
+    fn test_disk_refresh_throttling() {
+        let mut monitor = SystemMonitor::new();
+
+        let first_disk_refresh = monitor.last_disk_refresh;
+
+        monitor.refresh();
+        assert_eq!(monitor.last_disk_refresh, first_disk_refresh);
+
+        // Manually simulate 16 seconds elapsed
+        monitor.last_disk_refresh = Instant::now() - Duration::from_secs(16);
+        let past_disk_refresh = monitor.last_disk_refresh;
+
+        monitor.refresh();
+        assert!(monitor.last_disk_refresh > past_disk_refresh);
+    }
+
+    #[test]
+    fn test_get_disks_info() {
+        let monitor = SystemMonitor::new();
+        let disks = monitor.get_disks_info();
+        for disk in &disks {
+            assert!(!disk.mount_point.is_empty() || !disk.name.is_empty());
+        }
+    }
+}
+
