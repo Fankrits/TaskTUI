@@ -126,7 +126,9 @@ pub struct App {
     pub sort_direction: SortDirection,
     pub search_query: String,
     pub search_active: bool,
-    pub filtered_processes: Vec<ProcessInfo>,
+    pub filtered_processes: Vec<usize>,
+    pub top_cpu_indices: Vec<usize>,
+    pub top_mem_indices: Vec<usize>,
 
     // Network Table State
     pub network_table_state: TableState,
@@ -135,7 +137,7 @@ pub struct App {
     pub net_sort_direction: SortDirection,
     pub net_search_query: String,
     pub net_search_active: bool,
-    pub filtered_sockets: Vec<NetworkSocketItem>,
+    pub filtered_sockets: Vec<usize>,
     pub listening_only: bool,
 
     // State & Modals
@@ -162,6 +164,8 @@ impl App {
             search_query: String::new(),
             search_active: false,
             filtered_processes: Vec::new(),
+            top_cpu_indices: Vec::new(),
+            top_mem_indices: Vec::new(),
 
             network_table_state: TableState::default(),
             selected_net_idx: 0,
@@ -182,6 +186,7 @@ impl App {
 
         app.apply_process_filter_and_sort();
         app.apply_network_filter_and_sort();
+        app.update_top_rankings();
         if !app.filtered_processes.is_empty() {
             app.process_table_state.select(Some(0));
         }
@@ -205,6 +210,7 @@ impl App {
             let prev_socket_refresh = self.monitor.last_socket_refresh;
             self.monitor.refresh();
             self.apply_process_filter_and_sort();
+            self.update_top_rankings();
             if self.monitor.last_socket_refresh != prev_socket_refresh {
                 self.apply_network_filter_and_sort();
             }
@@ -226,76 +232,56 @@ impl App {
 
     pub fn apply_process_filter_and_sort(&mut self) {
         let query = self.search_query.to_lowercase().trim().to_string();
+        self.filtered_processes.clear();
 
-        let mut list: Vec<ProcessInfo> = self
-            .monitor
-            .processes
-            .iter()
-            .filter(|p| {
-                if query.is_empty() {
-                    return true;
-                }
-                p.name.to_lowercase().contains(&query)
-                    || p.pid.to_string().contains(&query)
-                    || p.user.to_lowercase().contains(&query)
-                    || p.ports.iter().any(|port| port.to_string().contains(&query))
-                    || p.cmd.to_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect();
-
-        // Sort
-        let dir = self.sort_direction;
-        match self.sort_column {
-            SortColumn::Pid => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.pid.cmp(&b.pid),
-                    SortDirection::Descending => b.pid.cmp(&a.pid),
-                });
-            }
-            SortColumn::Name => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    SortDirection::Descending => b.name.to_lowercase().cmp(&a.name.to_lowercase()),
-                });
-            }
-            SortColumn::Cpu => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.cpu_usage.partial_cmp(&b.cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
-                    SortDirection::Descending => b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
-                });
-            }
-            SortColumn::Memory => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.memory_bytes.cmp(&b.memory_bytes),
-                    SortDirection::Descending => b.memory_bytes.cmp(&a.memory_bytes),
-                });
-            }
-            SortColumn::Port => {
-                list.sort_by(|a, b| {
-                    let a_port = a.ports.first().copied().unwrap_or(0);
-                    let b_port = b.ports.first().copied().unwrap_or(0);
-                    match dir {
-                        SortDirection::Ascending => a_port.cmp(&b_port),
-                        SortDirection::Descending => b_port.cmp(&a_port),
-                    }
-                });
-            }
-            SortColumn::User => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.user.to_lowercase().cmp(&b.user.to_lowercase()),
-                    SortDirection::Descending => b.user.to_lowercase().cmp(&a.user.to_lowercase()),
-                });
-            }
-            SortColumn::Status => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.status.cmp(b.status),
-                    SortDirection::Descending => b.status.cmp(a.status),
-                });
+        for (idx, p) in self.monitor.processes.iter().enumerate() {
+            if query.is_empty()
+                || p.name.to_lowercase().contains(&query)
+                || p.pid.to_string().contains(&query)
+                || p.user.to_lowercase().contains(&query)
+                || p.ports.iter().any(|port| port.to_string().contains(&query))
+                || p.cmd.to_lowercase().contains(&query)
+            {
+                self.filtered_processes.push(idx);
             }
         }
 
-        self.filtered_processes = list;
+        let procs = &self.monitor.processes;
+        let dir = self.sort_direction;
+        match self.sort_column {
+            SortColumn::Pid => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].pid.cmp(&procs[b].pid),
+                SortDirection::Descending => procs[b].pid.cmp(&procs[a].pid),
+            }),
+            SortColumn::Name => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].name.to_lowercase().cmp(&procs[b].name.to_lowercase()),
+                SortDirection::Descending => procs[b].name.to_lowercase().cmp(&procs[a].name.to_lowercase()),
+            }),
+            SortColumn::Cpu => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].cpu_usage.partial_cmp(&procs[b].cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
+                SortDirection::Descending => procs[b].cpu_usage.partial_cmp(&procs[a].cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
+            }),
+            SortColumn::Memory => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].memory_bytes.cmp(&procs[b].memory_bytes),
+                SortDirection::Descending => procs[b].memory_bytes.cmp(&procs[a].memory_bytes),
+            }),
+            SortColumn::Port => self.filtered_processes.sort_by(|&a, &b| {
+                let a_port = procs[a].ports.first().copied().unwrap_or(0);
+                let b_port = procs[b].ports.first().copied().unwrap_or(0);
+                match dir {
+                    SortDirection::Ascending => a_port.cmp(&b_port),
+                    SortDirection::Descending => b_port.cmp(&a_port),
+                }
+            }),
+            SortColumn::User => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].user.to_lowercase().cmp(&procs[b].user.to_lowercase()),
+                SortDirection::Descending => procs[b].user.to_lowercase().cmp(&procs[a].user.to_lowercase()),
+            }),
+            SortColumn::Status => self.filtered_processes.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => procs[a].status.cmp(procs[b].status),
+                SortDirection::Descending => procs[b].status.cmp(procs[a].status),
+            }),
+        }
 
         if self.filtered_processes.is_empty() {
             self.selected_proc_idx = 0;
@@ -311,72 +297,57 @@ impl App {
     pub fn apply_network_filter_and_sort(&mut self) {
         let query = self.net_search_query.to_lowercase().trim().to_string();
         let listening_only = self.listening_only;
+        self.filtered_sockets.clear();
 
-        let mut list: Vec<NetworkSocketItem> = self
-            .monitor
-            .sockets
-            .iter()
-            .filter(|s| {
-                if listening_only && s.state != "LISTEN" {
-                    return false;
-                }
-                if query.is_empty() {
-                    return true;
-                }
-                s.local_port.to_string().contains(&query)
-                    || s.protocol.to_lowercase().contains(&query)
-                    || s.state.to_lowercase().contains(&query)
-                    || s.local_addr.to_lowercase().contains(&query)
-                    || s.remote_addr.to_lowercase().contains(&query)
-                    || s.pids.iter().any(|p| p.to_string().contains(&query))
-                    || s.process_names.iter().any(|n| n.to_lowercase().contains(&query))
-            })
-            .cloned()
-            .collect();
-
-        let dir = self.net_sort_direction;
-        match self.net_sort_column {
-            NetworkSortColumn::Port => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.local_port.cmp(&b.local_port),
-                    SortDirection::Descending => b.local_port.cmp(&a.local_port),
-                });
+        for (idx, s) in self.monitor.sockets.iter().enumerate() {
+            if listening_only && s.state != "LISTEN" {
+                continue;
             }
-            NetworkSortColumn::Protocol => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.protocol.cmp(&b.protocol),
-                    SortDirection::Descending => b.protocol.cmp(&a.protocol),
-                });
-            }
-            NetworkSortColumn::State => {
-                list.sort_by(|a, b| match dir {
-                    SortDirection::Ascending => a.state.cmp(&b.state),
-                    SortDirection::Descending => b.state.cmp(&a.state),
-                });
-            }
-            NetworkSortColumn::Pid => {
-                list.sort_by(|a, b| {
-                    let a_pid = a.pids.first().copied().unwrap_or(0);
-                    let b_pid = b.pids.first().copied().unwrap_or(0);
-                    match dir {
-                        SortDirection::Ascending => a_pid.cmp(&b_pid),
-                        SortDirection::Descending => b_pid.cmp(&a_pid),
-                    }
-                });
-            }
-            NetworkSortColumn::Name => {
-                list.sort_by(|a, b| {
-                    let a_name = a.process_names.first().cloned().unwrap_or_default();
-                    let b_name = b.process_names.first().cloned().unwrap_or_default();
-                    match dir {
-                        SortDirection::Ascending => a_name.cmp(&b_name),
-                        SortDirection::Descending => b_name.cmp(&a_name),
-                    }
-                });
+            if query.is_empty()
+                || s.local_port.to_string().contains(&query)
+                || s.protocol.to_lowercase().contains(&query)
+                || s.state.to_lowercase().contains(&query)
+                || s.local_addr.to_lowercase().contains(&query)
+                || s.remote_addr.to_lowercase().contains(&query)
+                || s.pids.iter().any(|p| p.to_string().contains(&query))
+                || s.process_names.iter().any(|n| n.to_lowercase().contains(&query))
+            {
+                self.filtered_sockets.push(idx);
             }
         }
 
-        self.filtered_sockets = list;
+        let socks = &self.monitor.sockets;
+        let dir = self.net_sort_direction;
+        match self.net_sort_column {
+            NetworkSortColumn::Port => self.filtered_sockets.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => socks[a].local_port.cmp(&socks[b].local_port),
+                SortDirection::Descending => socks[b].local_port.cmp(&socks[a].local_port),
+            }),
+            NetworkSortColumn::Protocol => self.filtered_sockets.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => socks[a].protocol.cmp(&socks[b].protocol),
+                SortDirection::Descending => socks[b].protocol.cmp(&socks[a].protocol),
+            }),
+            NetworkSortColumn::State => self.filtered_sockets.sort_by(|&a, &b| match dir {
+                SortDirection::Ascending => socks[a].state.cmp(&socks[b].state),
+                SortDirection::Descending => socks[b].state.cmp(&socks[a].state),
+            }),
+            NetworkSortColumn::Pid => self.filtered_sockets.sort_by(|&a, &b| {
+                let a_pid = socks[a].pids.first().copied().unwrap_or(0);
+                let b_pid = socks[b].pids.first().copied().unwrap_or(0);
+                match dir {
+                    SortDirection::Ascending => a_pid.cmp(&b_pid),
+                    SortDirection::Descending => b_pid.cmp(&a_pid),
+                }
+            }),
+            NetworkSortColumn::Name => self.filtered_sockets.sort_by(|&a, &b| {
+                let a_name = socks[a].process_names.first().map(|s| s.as_str()).unwrap_or("");
+                let b_name = socks[b].process_names.first().map(|s| s.as_str()).unwrap_or("");
+                match dir {
+                    SortDirection::Ascending => a_name.cmp(b_name),
+                    SortDirection::Descending => b_name.cmp(a_name),
+                }
+            }),
+        }
 
         if self.filtered_sockets.is_empty() {
             self.selected_net_idx = 0;
@@ -387,6 +358,34 @@ impl App {
             }
             self.network_table_state.select(Some(self.selected_net_idx));
         }
+    }
+
+    pub fn update_top_rankings(&mut self) {
+        let mut cpu_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
+        if cpu_indices.len() > 5 {
+            cpu_indices.select_nth_unstable_by(5, |&a, &b| {
+                self.monitor.processes[b].cpu_usage
+                    .partial_cmp(&self.monitor.processes[a].cpu_usage)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            cpu_indices.truncate(5);
+        }
+        cpu_indices.sort_by(|&a, &b| {
+            self.monitor.processes[b].cpu_usage
+                .partial_cmp(&self.monitor.processes[a].cpu_usage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        self.top_cpu_indices = cpu_indices;
+
+        let mut mem_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
+        if mem_indices.len() > 5 {
+            mem_indices.select_nth_unstable_by(5, |&a, &b| {
+                self.monitor.processes[b].memory_bytes.cmp(&self.monitor.processes[a].memory_bytes)
+            });
+            mem_indices.truncate(5);
+        }
+        mem_indices.sort_by_key(|&b| std::cmp::Reverse(self.monitor.processes[b].memory_bytes));
+        self.top_mem_indices = mem_indices;
     }
 
     pub fn next_row(&mut self) {
@@ -500,11 +499,11 @@ impl App {
     }
 
     pub fn get_selected_process(&self) -> Option<&ProcessInfo> {
-        self.filtered_processes.get(self.selected_proc_idx)
+        self.filtered_processes.get(self.selected_proc_idx).and_then(|&idx| self.monitor.processes.get(idx))
     }
 
     pub fn get_selected_socket(&self) -> Option<&NetworkSocketItem> {
-        self.filtered_sockets.get(self.selected_net_idx)
+        self.filtered_sockets.get(self.selected_net_idx).and_then(|&idx| self.monitor.sockets.get(idx))
     }
 
     pub fn prompt_kill_selected(&mut self, force: bool) {
@@ -543,6 +542,7 @@ impl App {
                     ToastKind::Success,
                 );
                 self.apply_process_filter_and_sort();
+                self.update_top_rankings();
                 self.apply_network_filter_and_sort();
             }
             Err(e) => {
@@ -773,5 +773,94 @@ mod tests {
 
         app.on_tick();
         assert_eq!(app.monitor.last_socket_refresh, initial_refresh);
+    }
+
+    #[test]
+    fn test_index_based_filter_and_sort() {
+        let mut app = App::new();
+        app.monitor.processes = vec![
+            create_test_process(1, "alpha", 10.0, 500),
+            create_test_process(2, "beta", 50.0, 100),
+            create_test_process(3, "gamma", 20.0, 900),
+        ];
+        app.search_query = "beta".to_string();
+        app.apply_process_filter_and_sort();
+
+        assert_eq!(app.filtered_processes.len(), 1);
+        assert_eq!(app.get_selected_process().unwrap().name, "beta");
+    }
+
+    #[test]
+    fn test_update_top_rankings() {
+        let mut app = App::new();
+        app.monitor.processes = vec![
+            create_test_process(1, "p1", 10.0, 500),
+            create_test_process(2, "p2", 80.0, 100),
+            create_test_process(3, "p3", 30.0, 900),
+            create_test_process(4, "p4", 95.0, 200),
+            create_test_process(5, "p5", 5.0, 1000),
+            create_test_process(6, "p6", 50.0, 50),
+        ];
+        app.update_top_rankings();
+
+        assert_eq!(app.top_cpu_indices.len(), 5);
+        // top cpu: p4 (95.0, idx 3), p2 (80.0, idx 1), p6 (50.0, idx 5), p3 (30.0, idx 2), p1 (10.0, idx 0)
+        assert_eq!(app.top_cpu_indices[0], 3);
+        assert_eq!(app.top_cpu_indices[1], 1);
+        assert_eq!(app.top_cpu_indices[2], 5);
+        assert_eq!(app.top_cpu_indices[3], 2);
+        assert_eq!(app.top_cpu_indices[4], 0);
+
+        assert_eq!(app.top_mem_indices.len(), 5);
+        // top mem: p5 (1000, idx 4), p3 (900, idx 2), p1 (500, idx 0), p4 (200, idx 3), p2 (100, idx 1)
+        assert_eq!(app.top_mem_indices[0], 4);
+        assert_eq!(app.top_mem_indices[1], 2);
+        assert_eq!(app.top_mem_indices[2], 0);
+        assert_eq!(app.top_mem_indices[3], 3);
+        assert_eq!(app.top_mem_indices[4], 1);
+    }
+
+    #[test]
+    fn test_index_based_network_filter_and_sort() {
+        let mut app = App::new();
+        app.monitor.sockets = vec![
+            NetworkSocketItem {
+                protocol: "TCP".to_string(),
+                local_addr: "127.0.0.1".to_string(),
+                local_port: 8080,
+                remote_addr: "0.0.0.0".to_string(),
+                state: "LISTEN".to_string(),
+                pids: vec![101],
+                process_names: vec!["web".to_string()],
+            },
+            NetworkSocketItem {
+                protocol: "TCP".to_string(),
+                local_addr: "127.0.0.1".to_string(),
+                local_port: 3000,
+                remote_addr: "0.0.0.0".to_string(),
+                state: "LISTEN".to_string(),
+                pids: vec![102],
+                process_names: vec!["node".to_string()],
+            },
+            NetworkSocketItem {
+                protocol: "UDP".to_string(),
+                local_addr: "0.0.0.0".to_string(),
+                local_port: 53,
+                remote_addr: "0.0.0.0".to_string(),
+                state: "NONE".to_string(),
+                pids: vec![103],
+                process_names: vec!["dns".to_string()],
+            },
+        ];
+
+        app.net_search_query = "node".to_string();
+        app.apply_network_filter_and_sort();
+        assert_eq!(app.filtered_sockets.len(), 1);
+        assert_eq!(app.get_selected_socket().unwrap().local_port, 3000);
+
+        app.net_search_query = String::new();
+        app.listening_only = true;
+        app.apply_network_filter_and_sort();
+        assert_eq!(app.filtered_sockets.len(), 2);
     }
 }
