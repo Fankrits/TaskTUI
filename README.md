@@ -122,6 +122,39 @@ cargo install --path .
 
 ---
 
+## 🛠️ CLI Commands & Maintenance
+
+| Command | Action |
+| :--- | :--- |
+| `tasktui update` (or `upgrade`) | Automatically fetch and install the latest GitHub release |
+| `tasktui uninstall` | Interactive uninstallation prompt to safely remove TaskTUI |
+| `tasktui uninstall -y` | Non-interactive uninstallation (skips confirmation prompt) |
+| `tasktui --version` (or `-v`) | Print installed TaskTUI version |
+| `tasktui --help` (or `-h`) | Display full CLI commands and keyboard shortcuts |
+
+---
+
+## 🗑️ Uninstallation
+
+TaskTUI is completely self-contained and leaves no hidden background processes. You can uninstall it anytime using:
+
+### Option 1: Built-in Command (Recommended)
+```bash
+tasktui uninstall
+```
+
+### Option 2: 1-Line Remote Uninstaller Script
+* **macOS / Linux**:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Fankrits/TaskTUI/main/uninstall.sh | sh
+  ```
+* **Windows (PowerShell)**:
+  ```powershell
+  irm https://raw.githubusercontent.com/Fankrits/TaskTUI/main/uninstall.ps1 | iex
+  ```
+
+---
+
 ## 💻 Platform Support
 
 * **macOS**: Apple Silicon (M1/M2/M3/M4) & Intel (x86_64)

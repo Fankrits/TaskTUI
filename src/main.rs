@@ -33,6 +33,10 @@ fn main() -> Result<(), anyhow::Error> {
             "update" | "upgrade" => {
                 return cli::run_update();
             }
+            "uninstall" | "--uninstall" => {
+                let skip_confirm = args.iter().any(|a| a == "-y" || a == "--yes");
+                return cli::run_uninstall(skip_confirm);
+            }
             unknown => {
                 eprintln!("\x1b[1;31mError:\x1b[0m Unknown argument: {unknown}");
                 eprintln!("Run `tasktui --help` for usage instructions.");
