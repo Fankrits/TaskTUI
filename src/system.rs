@@ -8,34 +8,80 @@ use sysinfo::{
 
 pub const HISTORY_LEN: usize = 60;
 
+/// A process row.
+///
+/// Fields are split into two classes for performance. *Identity* fields
+/// (`name`, `user`, `cmd`, `exe_path`, `session_id`, `start_time`) never change
+/// for the lifetime of a PID, so they are built once when the process is first
+/// seen and then left alone. *Volatile* fields (cpu, memory, status, ports) are
+/// overwritten in place on every refresh. This keeps a steady-state refresh
+/// free of heap allocation — see `SystemMonitor::refresh`.
+///
+/// The `*_lower` fields are pre-computed ASCII-lowercase copies used by the
+/// search filter and the name/user sort comparators, so neither has to
+/// allocate a temporary `String` per comparison.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
+    pub name_lower: String,
     pub cpu_usage: f32,
     pub memory_bytes: u64,
     pub memory_percent: f32,
     pub virtual_memory_bytes: u64,
     pub status: &'static str,
     pub user: String,
+    pub user_lower: String,
     pub session_id: Option<u32>,
     pub ports: Vec<u16>,
     pub exe_path: String,
     pub cmd: String,
+    pub cmd_lower: String,
     pub start_time: u64,
     pub run_time_secs: u64,
     pub disk_read_bytes: u64,
     pub disk_written_bytes: u64,
 }
 
+impl ProcessInfo {
+    /// Build a row with the lowercase search caches kept consistent with the
+    /// identity fields. Prefer this over a struct literal so the two can never
+    /// drift apart.
+    pub fn new(pid: u32, name: String, user: String, cmd: String) -> Self {
+        Self {
+            pid,
+            name_lower: name.to_lowercase(),
+            name,
+            cpu_usage: 0.0,
+            memory_bytes: 0,
+            memory_percent: 0.0,
+            virtual_memory_bytes: 0,
+            status: "Other",
+            user_lower: user.to_lowercase(),
+            user,
+            session_id: None,
+            ports: Vec::new(),
+            exe_path: String::new(),
+            cmd_lower: cmd.to_lowercase(),
+            cmd,
+            start_time: 0,
+            run_time_secs: 0,
+            disk_read_bytes: 0,
+            disk_written_bytes: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NetworkSocketItem {
-    pub protocol: String,
+    /// Static label ("TCP"/"UDP") — no per-socket allocation.
+    pub protocol: &'static str,
     pub local_port: u16,
     pub local_addr: String,
     pub remote_addr: String,
-    pub state: String,
+    /// Static label ("LISTEN", "ESTABLISHED", ...) — no per-socket allocation.
+    pub state: &'static str,
     pub pids: Vec<u32>,
     pub process_names: Vec<String>,
 }
@@ -92,6 +138,16 @@ pub struct SystemMonitor {
     // Cached Process & Socket Data
     pub processes: Vec<ProcessInfo>,
     pub sockets: Vec<NetworkSocketItem>,
+
+    /// Cached disk rows, rebuilt only when `disks` is actually refreshed
+    /// (every 15s) instead of once per rendered frame.
+    pub disks_info: Vec<DiskInfo>,
+
+    /// PID -> slot in `processes`, so a refresh can update rows in place
+    /// instead of rebuilding the whole vector.
+    pid_index: HashMap<u32, usize>,
+    /// Liveness marker, parallel to `processes`, reused across refreshes.
+    proc_seen: Vec<bool>,
 }
 
 impl SystemMonitor {
@@ -108,14 +164,16 @@ impl SystemMonitor {
     }
 
     pub fn new() -> Self {
+        // Only CPU *usage* is ever displayed. `CpuRefreshKind::everything()`
+        // would additionally sample per-core frequency, which costs an extra
+        // sysfs/proc read per core on every tick for data nothing renders.
         let refresh_kind = RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
+            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
             .with_memory(MemoryRefreshKind::everything())
             .with_processes(
                 ProcessRefreshKind::nothing()
                     .with_cpu()
                     .with_memory()
-                    .with_disk_usage()
                     .with_exe(UpdateKind::OnlyIfNotSet)
                     .with_cmd(UpdateKind::OnlyIfNotSet)
                     .with_user(UpdateKind::OnlyIfNotSet)
@@ -178,10 +236,25 @@ impl SystemMonitor {
             current_net_tx_rate: 0.0,
             processes: Vec::new(),
             sockets: Vec::new(),
+            disks_info: Vec::new(),
+            pid_index: HashMap::new(),
+            proc_seen: Vec::new(),
         };
 
+        monitor.rebuild_disks_info();
         monitor.refresh();
         monitor
+    }
+
+    fn rebuild_disks_info(&mut self) {
+        self.disks_info.clear();
+        self.disks_info.extend(self.disks.iter().map(|d| DiskInfo {
+            name: d.name().to_string_lossy().to_string(),
+            mount_point: d.mount_point().to_string_lossy().to_string(),
+            total_bytes: d.total_space(),
+            available_bytes: d.available_space(),
+            file_system: d.file_system().to_string_lossy().to_string(),
+        }));
     }
 
     pub fn refresh(&mut self) {
@@ -190,7 +263,7 @@ impl SystemMonitor {
         self.last_refresh = now;
 
         // Targeted CPU & Memory Refresh
-        self.sys.refresh_cpu_all();
+        self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
@@ -198,7 +271,6 @@ impl SystemMonitor {
             ProcessRefreshKind::nothing()
                 .with_cpu()
                 .with_memory()
-                .with_disk_usage()
                 .with_exe(UpdateKind::OnlyIfNotSet)
                 .with_cmd(UpdateKind::OnlyIfNotSet)
                 .with_user(UpdateKind::OnlyIfNotSet)
@@ -211,13 +283,17 @@ impl SystemMonitor {
         if self.last_disk_refresh.elapsed() >= std::time::Duration::from_secs(15) {
             self.disks.refresh(true);
             self.last_disk_refresh = now;
+            self.rebuild_disks_info();
         }
 
         self.used_memory = self.sys.used_memory();
         self.used_swap = self.sys.used_swap();
         self.global_cpu = self.sys.global_cpu_usage();
 
-        self.per_core_cpu = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
+        // Reuse the existing buffer rather than collecting a fresh Vec each tick.
+        self.per_core_cpu.clear();
+        self.per_core_cpu
+            .extend(self.sys.cpus().iter().map(|c| c.cpu_usage()));
 
         // Shift and push to fixed arrays
         let cpu_val = (self.global_cpu.clamp(0.0, 100.0)).round() as u64;
@@ -261,9 +337,10 @@ impl SystemMonitor {
         self.net_tx_history[HISTORY_LEN - 1] = tx_kb;
 
         // Map listening / active ports to PIDs - throttled to every 3 seconds
-        if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3)
-            || self.sockets.is_empty()
-        {
+        let sockets_changed = self.last_socket_refresh.elapsed()
+            >= std::time::Duration::from_secs(3)
+            || self.sockets.is_empty();
+        if sockets_changed {
             let (pid_to_ports, socket_list) = Self::collect_sockets();
             self.cached_pid_ports = pid_to_ports;
             self.sockets = socket_list;
@@ -272,103 +349,158 @@ impl SystemMonitor {
 
         let system_uptime = System::uptime();
 
-        let mut proc_list: Vec<ProcessInfo> = Vec::with_capacity(self.sys.processes().len());
-        for (pid, process) in self.sys.processes() {
+        // Update the process table in place. Rows that already exist keep their
+        // identity strings (name/user/cmd/exe) and only have their volatile
+        // metrics overwritten, so a steady-state tick allocates nothing.
+        //
+        // Fields are borrowed individually so the immutable borrow of `sys`
+        // can coexist with the mutable borrows of the caches below.
+        let sys = &self.sys;
+        let users = &self.users;
+        let user_cache = &mut self.user_cache;
+        let processes = &mut self.processes;
+        let pid_index = &mut self.pid_index;
+        let proc_seen = &mut self.proc_seen;
+        let cached_pid_ports = &self.cached_pid_ports;
+        let total_memory = self.total_memory;
+
+        proc_seen.clear();
+        proc_seen.resize(processes.len(), false);
+
+        let mut alive = 0usize;
+        for (pid, process) in sys.processes() {
             let pid_u32 = pid.as_u32();
-            let name = process.name().to_string_lossy().to_string();
-            let cpu_usage = process.cpu_usage();
-            let memory_bytes = process.memory();
-            let virtual_memory_bytes = process.virtual_memory();
-            let memory_percent = if self.total_memory > 0 {
-                (memory_bytes as f32 / self.total_memory as f32) * 100.0
+
+            let slot = match pid_index.get(&pid_u32) {
+                Some(&slot) => slot,
+                None => {
+                    // Newly observed PID: build its identity strings once.
+                    let name = process.name().to_string_lossy().to_string();
+                    let user = match process.user_id() {
+                        Some(uid) => user_cache
+                            .entry(uid.clone())
+                            .or_insert_with(|| {
+                                users
+                                    .get_user_by_id(uid)
+                                    .map(|u| u.name().to_string())
+                                    .unwrap_or_else(|| "-".to_string())
+                            })
+                            .clone(),
+                        None => "-".to_string(),
+                    };
+                    let cmd = if process.cmd().is_empty() {
+                        String::new()
+                    } else {
+                        let mut buf = String::new();
+                        for (i, part) in process.cmd().iter().enumerate() {
+                            if i > 0 {
+                                buf.push(' ');
+                            }
+                            buf.push_str(&part.to_string_lossy());
+                        }
+                        buf
+                    };
+
+                    let mut info = ProcessInfo::new(pid_u32, name, user, cmd);
+                    info.session_id = process.session_id().map(|s| s.as_u32());
+                    info.start_time = process.start_time();
+                    info.exe_path = process
+                        .exe()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let slot = processes.len();
+                    processes.push(info);
+                    proc_seen.push(false);
+                    pid_index.insert(pid_u32, slot);
+                    slot
+                }
+            };
+
+            proc_seen[slot] = true;
+            alive += 1;
+
+            // Volatile metrics — overwritten every tick, never reallocated.
+            let p = &mut processes[slot];
+            p.cpu_usage = process.cpu_usage();
+            p.memory_bytes = process.memory();
+            p.virtual_memory_bytes = process.virtual_memory();
+            p.memory_percent = if total_memory > 0 {
+                (p.memory_bytes as f32 / total_memory as f32) * 100.0
             } else {
                 0.0
             };
-
-            let status_str = Self::map_status(process.status());
-            let user = match process.user_id() {
-                Some(uid) => {
-                    if let Some(cached_user) = self.user_cache.get(uid) {
-                        cached_user.clone()
-                    } else {
-                        let user_name = self
-                            .users
-                            .get_user_by_id(uid)
-                            .map(|u| u.name().to_string())
-                            .unwrap_or_else(|| "-".to_string());
-                        self.user_cache.insert(uid.clone(), user_name.clone());
-                        user_name
-                    }
-                }
-                None => "-".to_string(),
-            };
-
-            let session_id = process.session_id().map(|s| s.as_u32());
-            let ports = self
-                .cached_pid_ports
-                .get(&pid_u32)
-                .cloned()
-                .unwrap_or_default();
-
-            let exe_path = process
-                .exe()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            let cmd = if process.cmd().is_empty() {
-                String::new()
-            } else {
-                process
-                    .cmd()
-                    .iter()
-                    .map(|s| s.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
-
-            let start_time = process.start_time();
-            let run_time_secs = system_uptime.saturating_sub(start_time);
+            p.status = Self::map_status(process.status());
+            p.run_time_secs = system_uptime.saturating_sub(p.start_time);
 
             let disk_usage = process.disk_usage();
-            let disk_read_bytes = disk_usage.read_bytes;
-            let disk_written_bytes = disk_usage.written_bytes;
+            p.disk_read_bytes = disk_usage.read_bytes;
+            p.disk_written_bytes = disk_usage.written_bytes;
 
-            proc_list.push(ProcessInfo {
-                pid: pid_u32,
-                name,
-                cpu_usage,
-                memory_bytes,
-                memory_percent,
-                virtual_memory_bytes,
-                status: status_str,
-                user,
-                session_id,
-                ports,
-                exe_path,
-                cmd,
-                start_time,
-                run_time_secs,
-                disk_read_bytes,
-                disk_written_bytes,
-            });
+            p.ports.clear();
+            if let Some(ports) = cached_pid_ports.get(&pid_u32) {
+                p.ports.extend_from_slice(ports);
+            }
         }
 
-        // Build O(1) PID -> Name lookup
-        let pid_to_name: HashMap<u32, &str> =
-            proc_list.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        // Drop rows for processes that have exited, then re-index. Only runs on
+        // the ticks where something actually died.
+        if alive < processes.len() {
+            let mut slot = 0usize;
+            processes.retain(|_| {
+                let keep = proc_seen[slot];
+                slot += 1;
+                keep
+            });
+            pid_index.clear();
+            for (i, p) in processes.iter().enumerate() {
+                pid_index.insert(p.pid, i);
+            }
+        }
 
-        // Attach process names to sockets in O(S * P) instead of O(S * P * N)
+        // Socket -> process-name association only needs redoing when the socket
+        // list itself was re-collected (every 3s), not on every tick.
+        if sockets_changed {
+            self.attach_socket_process_names();
+        }
+    }
+
+    /// Sample disk I/O counters for a single process.
+    ///
+    /// Disk usage is the only per-process metric that costs an extra `/proc`
+    /// read per PID, and it is only ever displayed in the details modal. Rather
+    /// than pay for it across every process on every tick, the app calls this
+    /// for the one process currently being inspected.
+    pub fn refresh_process_disk_usage(&mut self, pid: u32) {
+        let target = sysinfo::Pid::from_u32(pid);
+        self.sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[target]),
+            false,
+            ProcessRefreshKind::nothing().with_disk_usage(),
+        );
+
+        let Some(process) = self.sys.process(target) else {
+            return;
+        };
+        let usage = process.disk_usage();
+        if let Some(&slot) = self.pid_index.get(&pid) {
+            self.processes[slot].disk_read_bytes = usage.read_bytes;
+            self.processes[slot].disk_written_bytes = usage.written_bytes;
+        }
+    }
+
+    /// Fill in `process_names` for each socket via an O(1) PID lookup.
+    fn attach_socket_process_names(&mut self) {
+        let processes = &self.processes;
+        let pid_index = &self.pid_index;
         for sock in &mut self.sockets {
-            let mut names = Vec::with_capacity(sock.pids.len());
-            for p in &sock.pids {
-                if let Some(&name) = pid_to_name.get(p) {
-                    names.push(name.to_string());
+            sock.process_names.clear();
+            for pid in &sock.pids {
+                if let Some(&slot) = pid_index.get(pid) {
+                    sock.process_names.push(processes[slot].name.clone());
                 }
             }
-            sock.process_names = names;
         }
-
-        self.processes = proc_list;
     }
 
     pub fn refresh_sockets(&mut self) {
@@ -377,28 +509,13 @@ impl SystemMonitor {
         self.sockets = socket_list;
         self.last_socket_refresh = Instant::now();
 
-        // Update process names for sockets using existing process list
-        let pid_to_name: HashMap<u32, &str> = self
-            .processes
-            .iter()
-            .map(|p| (p.pid, p.name.as_str()))
-            .collect();
-        for sock in &mut self.sockets {
-            let mut names = Vec::with_capacity(sock.pids.len());
-            for p in &sock.pids {
-                if let Some(&name) = pid_to_name.get(p) {
-                    names.push(name.to_string());
-                }
-            }
-            sock.process_names = names;
-        }
+        self.attach_socket_process_names();
 
-        // Update ports on existing processes
+        // Update ports on existing processes, reusing each row's buffer.
         for proc in &mut self.processes {
+            proc.ports.clear();
             if let Some(ports) = self.cached_pid_ports.get(&proc.pid) {
-                proc.ports = ports.clone();
-            } else {
-                proc.ports.clear();
+                proc.ports.extend_from_slice(ports);
             }
         }
     }
@@ -435,8 +552,7 @@ impl SystemMonitor {
                             TcpState::LastAck => "LAST_ACK",
                             TcpState::Closing => "CLOSING",
                             _ => "UNKNOWN",
-                        }
-                        .to_string();
+                        };
 
                         for &p in &pids {
                             let entry = pid_to_ports.entry(p).or_default();
@@ -446,7 +562,7 @@ impl SystemMonitor {
                         }
 
                         socket_items.push(NetworkSocketItem {
-                            protocol: "TCP".to_string(),
+                            protocol: "TCP",
                             local_port,
                             local_addr,
                             remote_addr,
@@ -459,7 +575,7 @@ impl SystemMonitor {
                         let local_port = udp.local_port;
                         let local_addr = format!("{}:{}", udp.local_addr, udp.local_port);
                         let remote_addr = "*:*".to_string();
-                        let state = "UDP".to_string();
+                        let state = "UDP";
 
                         for &p in &pids {
                             let entry = pid_to_ports.entry(p).or_default();
@@ -469,7 +585,7 @@ impl SystemMonitor {
                         }
 
                         socket_items.push(NetworkSocketItem {
-                            protocol: "UDP".to_string(),
+                            protocol: "UDP",
                             local_port,
                             local_addr,
                             remote_addr,
@@ -490,17 +606,10 @@ impl SystemMonitor {
         (pid_to_ports, socket_items)
     }
 
-    pub fn get_disks_info(&self) -> Vec<DiskInfo> {
-        self.disks
-            .iter()
-            .map(|d| DiskInfo {
-                name: d.name().to_string_lossy().to_string(),
-                mount_point: d.mount_point().to_string_lossy().to_string(),
-                total_bytes: d.total_space(),
-                available_bytes: d.available_space(),
-                file_system: d.file_system().to_string_lossy().to_string(),
-            })
-            .collect()
+    /// Borrow the cached disk rows. Rebuilt on the 15s disk refresh, so the
+    /// render path never pays for it.
+    pub fn get_disks_info(&self) -> &[DiskInfo] {
+        &self.disks_info
     }
 
     pub fn kill_process(&mut self, pid: u32, force: bool) -> Result<(), String> {
@@ -659,7 +768,7 @@ mod tests {
     fn test_get_disks_info() {
         let monitor = SystemMonitor::new();
         let disks = monitor.get_disks_info();
-        for disk in &disks {
+        for disk in disks {
             assert!(!disk.mount_point.is_empty() || !disk.name.is_empty());
         }
     }

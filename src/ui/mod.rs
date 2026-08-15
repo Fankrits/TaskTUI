@@ -155,6 +155,97 @@ mod tests {
         }
     }
 
+    /// Flatten a rendered frame into text so tests can assert on what is on
+    /// screen.
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    /// The process table only builds widgets for the rows that fit on screen.
+    /// This guards the scroll maths behind that: the selected row must actually
+    /// be drawn, and rows outside the window must not be.
+    #[test]
+    fn test_process_table_virtualized_window_follows_selection() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        app.monitor.processes = (0..500)
+            .map(|i| {
+                let mut p = crate::system::ProcessInfo::new(
+                    i,
+                    format!("proc{i:03}"),
+                    "tester".to_string(),
+                    String::new(),
+                );
+                p.status = "Run";
+                p
+            })
+            .collect();
+        app.sort_column = crate::app::SortColumn::Pid;
+        app.sort_direction = crate::app::SortDirection::Ascending;
+        app.apply_process_filter_and_sort();
+
+        // Top of the list.
+        app.select_first();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let top = buffer_text(&terminal);
+        assert!(top.contains("proc000"), "first row should be visible");
+        assert!(
+            !top.contains("proc499"),
+            "last row must not be drawn while scrolled to the top"
+        );
+        assert_eq!(app.proc_view_offset, 0);
+
+        // Jump to the end: the window must scroll to bring it into view.
+        app.select_last();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let bottom = buffer_text(&terminal);
+        assert!(
+            bottom.contains("proc499"),
+            "selected last row should be drawn after scrolling"
+        );
+        assert!(
+            !bottom.contains("proc000"),
+            "rows scrolled off the top must not be drawn"
+        );
+        assert!(
+            app.proc_view_offset > 0,
+            "view should have scrolled, got offset {}",
+            app.proc_view_offset
+        );
+
+        // And back to the top again.
+        app.select_first();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        assert!(buffer_text(&terminal).contains("proc000"));
+        assert_eq!(app.proc_view_offset, 0);
+    }
+
+    /// A stale filter index must never panic the renderer, since filtering is
+    /// skipped on ticks while another tab is in front.
+    #[test]
+    fn test_render_survives_stale_filter_indices() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        app.filtered_processes = vec![0, 1, 999_999];
+        app.selected_proc_idx = 2;
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+
+        app.filtered_sockets = vec![0, 424_242];
+        app.selected_net_idx = 1;
+        app.active_tab = Tab::NetworkPorts;
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+    }
+
     #[test]
     fn test_render_populated_tables_and_search_mode() {
         let backend = TestBackend::new(120, 40);
