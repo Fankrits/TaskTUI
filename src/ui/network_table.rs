@@ -110,7 +110,8 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
             .style(Style::default().bg(theme.table_header_bg))
             .height(1);
 
-        let rows = app.filtered_sockets.iter().enumerate().map(|(idx, s)| {
+        let rows = app.filtered_sockets.iter().enumerate().map(|(idx, &sock_idx)| {
+            let s = &app.monitor.sockets[sock_idx];
             let is_even = idx % 2 == 0;
             let row_bg = if is_even {
                 Color::Rgb(15, 23, 42)
@@ -148,15 +149,15 @@ pub fn render_network_table(f: &mut Frame, app: &mut App, area: Rect) {
                     Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
                 )),
                 Cell::from(Span::styled(
-                    s.protocol.clone(),
+                    &s.protocol,
                     Style::default().fg(theme.secondary),
                 )),
                 Cell::from(Span::styled(
-                    s.state.clone(),
+                    &s.state,
                     Style::default().fg(state_color).add_modifier(Modifier::BOLD),
                 )),
-                Cell::from(Span::styled(s.local_addr.clone(), Style::default().fg(theme.fg))),
-                Cell::from(Span::styled(s.remote_addr.clone(), Style::default().fg(theme.fg_dim))),
+                Cell::from(Span::styled(&s.local_addr, Style::default().fg(theme.fg))),
+                Cell::from(Span::styled(&s.remote_addr, Style::default().fg(theme.fg_dim))),
                 Cell::from(Span::styled(pids_str, Style::default().fg(theme.primary))),
                 Cell::from(Span::styled(
                     names_str,

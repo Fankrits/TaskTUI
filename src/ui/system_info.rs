@@ -107,9 +107,9 @@ pub fn render_system_info(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let cells = vec![
-                Cell::from(Span::styled(d.name.clone(), Style::default().fg(theme.primary).add_modifier(Modifier::BOLD))),
-                Cell::from(Span::styled(d.mount_point.clone(), Style::default().fg(theme.fg))),
-                Cell::from(Span::styled(d.file_system.clone(), Style::default().fg(theme.fg_dim))),
+                Cell::from(Span::styled(&d.name, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD))),
+                Cell::from(Span::styled(&d.mount_point, Style::default().fg(theme.fg))),
+                Cell::from(Span::styled(&d.file_system, Style::default().fg(theme.fg_dim))),
                 Cell::from(Span::styled(format!("{:.1} GB", used_gb), Style::default().fg(theme.fg))),
                 Cell::from(Span::styled(format!("{:.1} GB", avail_gb), Style::default().fg(theme.success))),
                 Cell::from(Span::styled(format!("{:.1} GB", total_gb), Style::default().fg(theme.fg))),
@@ -161,7 +161,7 @@ pub fn render_system_info(f: &mut Frame, app: &App, area: Rect) {
             let tx_mb = data.total_transmitted() as f64 / (1024.0 * 1024.0);
 
             let cells = vec![
-                Cell::from(Span::styled(interface_name.clone(), Style::default().fg(theme.secondary).add_modifier(Modifier::BOLD))),
+                Cell::from(Span::styled(interface_name.as_str(), Style::default().fg(theme.secondary).add_modifier(Modifier::BOLD))),
                 Cell::from(Span::styled(format!("{:.2} MB", rx_mb), Style::default().fg(theme.success))),
                 Cell::from(Span::styled(format!("{:.2} MB", tx_mb), Style::default().fg(theme.info))),
                 Cell::from(Span::styled(format!("{} pkts", data.total_packets_received()), Style::default().fg(theme.fg_dim))),

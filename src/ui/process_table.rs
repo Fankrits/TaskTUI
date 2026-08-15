@@ -119,8 +119,9 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
             .height(1)
             .bottom_margin(0);
 
-        let rows = app.filtered_processes.iter().enumerate().map(|(idx, p)| {
-            let is_even = idx % 2 == 0;
+        let rows = app.filtered_processes.iter().enumerate().map(|(display_idx, &real_idx)| {
+            let p = &app.monitor.processes[real_idx];
+            let is_even = display_idx % 2 == 0;
             let row_bg = if is_even {
                 Color::Rgb(15, 23, 42)
             } else {
@@ -130,24 +131,18 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
             let cpu_color = theme.cpu_color(p.cpu_usage);
             let mem_color = theme.memory_color(p.memory_percent);
 
-            let mem_str = format_memory(p.memory_bytes);
+            let status_icon = match p.status {
+                "Run" => "● Run",
+                "Sleep" => "○ Slp",
+                "Idle" => "▲ Idl",
+                "Zombie" | "Dead" => "✕ Ded",
+                _ => "• Oth",
+            };
+
             let ports_str = if p.ports.is_empty() {
                 "-".to_string()
             } else {
-                p.ports
-                    .iter()
-                    .take(3)
-                    .map(|port| format!(":{}", port))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-
-            let status_icon = match p.status.to_lowercase().as_str() {
-                "run" | "running" => "● Run",
-                "sleep" | "sleeping" => "○ Slp",
-                "idle" => "▲ Idl",
-                "zombie" | "dead" => "✕ Ded",
-                _ => "• Oth",
+                p.ports.iter().take(3).map(|port| format!(":{}", port)).collect::<Vec<_>>().join(", ")
             };
 
             let user_sess = match p.session_id {
@@ -157,36 +152,14 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
 
             let cells = vec![
                 Cell::from(Span::styled(p.pid.to_string(), Style::default().fg(theme.primary))),
-                Cell::from(Span::styled(
-                    p.name.clone(),
-                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-                )),
-                Cell::from(Span::styled(
-                    format!("{:>5.1}%", p.cpu_usage),
-                    Style::default().fg(cpu_color).add_modifier(Modifier::BOLD),
-                )),
-                Cell::from(Span::styled(mem_str, Style::default().fg(theme.fg))),
-                Cell::from(Span::styled(
-                    format!("{:>4.1}%", p.memory_percent),
-                    Style::default().fg(mem_color),
-                )),
-                Cell::from(Span::styled(
-                    ports_str,
-                    Style::default().fg(if p.ports.is_empty() {
-                        theme.fg_dim
-                    } else {
-                        theme.warning
-                    }),
-                )),
-                Cell::from(Span::styled(
-                    status_icon,
-                    Style::default().fg(theme.status_color(p.status)),
-                )),
+                Cell::from(Span::styled(&p.name, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD))),
+                Cell::from(Span::styled(format!("{:>5.1}%", p.cpu_usage), Style::default().fg(cpu_color).add_modifier(Modifier::BOLD))),
+                Cell::from(Span::styled(format_memory(p.memory_bytes), Style::default().fg(theme.fg))),
+                Cell::from(Span::styled(format!("{:>4.1}%", p.memory_percent), Style::default().fg(mem_color))),
+                Cell::from(Span::styled(ports_str, Style::default().fg(if p.ports.is_empty() { theme.fg_dim } else { theme.warning }))),
+                Cell::from(Span::styled(status_icon, Style::default().fg(theme.status_color(p.status)))),
                 Cell::from(Span::styled(user_sess, Style::default().fg(theme.fg_dim))),
-                Cell::from(Span::styled(
-                    p.cmd.clone(),
-                    Style::default().fg(theme.fg_dim),
-                )),
+                Cell::from(Span::styled(&p.cmd, Style::default().fg(theme.fg_dim))),
             ];
 
             Row::new(cells).style(Style::default().bg(row_bg)).height(1)

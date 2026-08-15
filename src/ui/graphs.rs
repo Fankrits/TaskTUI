@@ -115,7 +115,7 @@ fn render_cpu_box(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(cpu_gauge, cpu_chunks[1]);
 
     let sparkline = Sparkline::default()
-        .data(&app.monitor.cpu_history)
+        .data(app.monitor.cpu_history)
         .max(100)
         .style(Style::default().fg(cpu_color));
     f.render_widget(sparkline, cpu_chunks[2]);
@@ -173,7 +173,7 @@ fn render_memory_box(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(mem_gauge, mem_chunks[1]);
 
     let sparkline = Sparkline::default()
-        .data(&app.monitor.mem_history)
+        .data(app.monitor.mem_history)
         .max(100)
         .style(Style::default().fg(theme.sparkline_mem));
     f.render_widget(sparkline, mem_chunks[2]);
@@ -218,14 +218,14 @@ fn render_network_box(f: &mut Frame, app: &App, area: Rect) {
 
     let max_rx = app.monitor.net_rx_history.iter().copied().max().unwrap_or(10).max(10);
     let rx_sparkline = Sparkline::default()
-        .data(&app.monitor.net_rx_history)
+        .data(app.monitor.net_rx_history)
         .max(max_rx)
         .style(Style::default().fg(theme.success));
     f.render_widget(rx_sparkline, net_chunks[1]);
 
     let max_tx = app.monitor.net_tx_history.iter().copied().max().unwrap_or(10).max(10);
     let tx_sparkline = Sparkline::default()
-        .data(&app.monitor.net_tx_history)
+        .data(app.monitor.net_tx_history)
         .max(max_tx)
         .style(Style::default().fg(theme.secondary));
     f.render_widget(tx_sparkline, net_chunks[2]);
@@ -243,7 +243,6 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let top_cpu = app.get_top_cpu_processes(limit);
     let mut lines = Vec::new();
 
     let rank_colors = [
@@ -254,36 +253,38 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
         Color::Rgb(100, 116, 139), // #5 Muted
     ];
 
-    for (idx, p) in top_cpu.iter().enumerate() {
-        let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
-        let rank_num = format!("#{} ", idx + 1);
+    for (idx, &proc_idx) in app.top_cpu_indices.iter().take(limit).enumerate() {
+        if let Some(p) = app.monitor.processes.get(proc_idx) {
+            let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
+            let rank_num = format!("#{} ", idx + 1);
 
-        let proc_name = if p.name.chars().count() > 14 {
-            let prefix: String = p.name.chars().take(13).collect();
-            format!("{}…", prefix)
-        } else {
-            p.name.clone()
-        };
+            let proc_name = if p.name.chars().count() > 14 {
+                let prefix: String = p.name.chars().take(13).collect();
+                format!("{}…", prefix)
+            } else {
+                p.name.clone()
+            };
 
-        let cpu_color = theme.cpu_color(p.cpu_usage);
-        let bar_width = 8;
-        let filled = ((p.cpu_usage.max(0.0) / 100.0) * bar_width as f32).round() as usize;
-        let filled = filled.min(bar_width);
-        let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
+            let cpu_color = theme.cpu_color(p.cpu_usage);
+            let bar_width = 8;
+            let filled = ((p.cpu_usage.max(0.0) / 100.0) * bar_width as f32).round() as usize;
+            let filled = filled.min(bar_width);
+            let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
 
-        lines.push(Line::from(vec![
-            Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("{:<14}", proc_name),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(bar_str, Style::default().fg(cpu_color)),
-            Span::styled(
-                format!(" {:>5.1}%", p.cpu_usage),
-                Style::default().fg(cpu_color).add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:<14}", proc_name),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(bar_str, Style::default().fg(cpu_color)),
+                Span::styled(
+                    format!(" {:>5.1}%", p.cpu_usage),
+                    Style::default().fg(cpu_color).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
     }
 
     if lines.is_empty() {
@@ -305,7 +306,6 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let top_mem = app.get_top_memory_processes(limit);
     let mut lines = Vec::new();
 
     let rank_colors = [
@@ -316,38 +316,40 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
         Color::Rgb(100, 116, 139), // #5 Muted
     ];
 
-    for (idx, p) in top_mem.iter().enumerate() {
-        let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
-        let rank_num = format!("#{} ", idx + 1);
+    for (idx, &proc_idx) in app.top_mem_indices.iter().take(limit).enumerate() {
+        if let Some(p) = app.monitor.processes.get(proc_idx) {
+            let rank_color = rank_colors.get(idx).copied().unwrap_or(theme.fg_dim);
+            let rank_num = format!("#{} ", idx + 1);
 
-        let proc_name = if p.name.chars().count() > 14 {
-            let prefix: String = p.name.chars().take(13).collect();
-            format!("{}…", prefix)
-        } else {
-            p.name.clone()
-        };
+            let proc_name = if p.name.chars().count() > 14 {
+                let prefix: String = p.name.chars().take(13).collect();
+                format!("{}…", prefix)
+            } else {
+                p.name.clone()
+            };
 
-        let mem_color = theme.memory_color(p.memory_percent);
-        let bar_width = 8;
-        let filled = ((p.memory_percent.max(0.0) / 100.0) * bar_width as f32).round() as usize;
-        let filled = filled.min(bar_width);
-        let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
+            let mem_color = theme.memory_color(p.memory_percent);
+            let bar_width = 8;
+            let filled = ((p.memory_percent.max(0.0) / 100.0) * bar_width as f32).round() as usize;
+            let filled = filled.min(bar_width);
+            let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
 
-        let mem_str = format_memory_compact(p.memory_bytes);
+            let mem_str = format_memory_compact(p.memory_bytes);
 
-        lines.push(Line::from(vec![
-            Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("{:<14}", proc_name),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(bar_str, Style::default().fg(mem_color)),
-            Span::styled(
-                format!(" {:>7}", mem_str),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:<14}", proc_name),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(bar_str, Style::default().fg(mem_color)),
+                Span::styled(
+                    format!(" {:>7}", mem_str),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
     }
 
     if lines.is_empty() {

@@ -149,4 +149,31 @@ mod tests {
             terminal.draw(|f| render(f, &mut app)).unwrap();
         }
     }
+
+    #[test]
+    fn test_render_populated_tables_and_search_mode() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut app = App::new();
+        // Processes tab with search active
+        app.switch_tab(Tab::Processes);
+        app.search_active = true;
+        app.search_query = "cargo".to_string();
+        app.apply_process_filter_and_sort();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+
+        // Network tab with search and listen filter active
+        app.switch_tab(Tab::NetworkPorts);
+        app.net_search_active = true;
+        app.net_search_query = "80".to_string();
+        app.listening_only = true;
+        app.apply_network_filter_and_sort();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+
+        // Top rankings with mock data
+        app.update_top_rankings();
+        app.dashboard_view = DashboardView::TopRank;
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+    }
 }

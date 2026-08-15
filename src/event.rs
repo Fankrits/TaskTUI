@@ -491,7 +491,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     if target_idx < app.filtered_processes.len() {
                         if app.selected_proc_idx == target_idx {
                             // Clicked already selected process -> open details inspector!
-                            if let Some(proc) = app.filtered_processes.get(target_idx) {
+                            if let Some(proc) = app.filtered_processes.get(target_idx).and_then(|&idx| app.monitor.processes.get(idx)) {
                                 app.active_modal = Modal::ProcessDetails(proc.pid);
                             }
                         } else {
@@ -505,7 +505,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     let target_idx = app.network_table_state.offset() + row_offset;
                     if target_idx < app.filtered_sockets.len() {
                         if app.selected_net_idx == target_idx {
-                            if let Some(&pid) = app.filtered_sockets.get(target_idx).and_then(|s| s.pids.first()) {
+                            if let Some(&pid) = app.filtered_sockets.get(target_idx).and_then(|&idx| app.monitor.sockets.get(idx)).and_then(|s| s.pids.first()) {
                                 app.active_modal = Modal::ProcessDetails(pid);
                             }
                         } else {
