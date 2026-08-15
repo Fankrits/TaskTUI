@@ -134,15 +134,15 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
 
         // Tab Navigation
         KeyCode::Tab => {
-            app.active_tab = app.active_tab.next();
+            app.switch_tab(app.active_tab.next());
         }
         KeyCode::BackTab => {
-            app.active_tab = app.active_tab.prev();
+            app.switch_tab(app.active_tab.prev());
         }
-        KeyCode::Char('1') => app.active_tab = Tab::Processes,
-        KeyCode::Char('2') => app.active_tab = Tab::NetworkPorts,
-        KeyCode::Char('3') => app.active_tab = Tab::SystemDetails,
-        KeyCode::Char('4') => app.active_tab = Tab::Help,
+        KeyCode::Char('1') => app.switch_tab(Tab::Processes),
+        KeyCode::Char('2') => app.switch_tab(Tab::NetworkPorts),
+        KeyCode::Char('3') => app.switch_tab(Tab::SystemDetails),
+        KeyCode::Char('4') => app.switch_tab(Tab::Help),
 
         // Vertical row navigation
         KeyCode::Down | KeyCode::Char('j') => {
@@ -266,6 +266,7 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Manual Refresh
         KeyCode::F(5) => {
             app.monitor.refresh();
+            app.monitor.refresh_sockets();
             app.apply_process_filter_and_sort();
             app.apply_network_filter_and_sort();
             app.add_toast("Refreshed data".to_string(), ToastKind::Info);
@@ -397,10 +398,10 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                 let rel_x = x - brand_width;
                 let tab_idx = (rel_x * 4 / tab_area_width.max(1)).min(3);
                 match tab_idx {
-                    0 => app.active_tab = Tab::Processes,
-                    1 => app.active_tab = Tab::NetworkPorts,
-                    2 => app.active_tab = Tab::SystemDetails,
-                    3 => app.active_tab = Tab::Help,
+                    0 => app.switch_tab(Tab::Processes),
+                    1 => app.switch_tab(Tab::NetworkPorts),
+                    2 => app.switch_tab(Tab::SystemDetails),
+                    3 => app.switch_tab(Tab::Help),
                     _ => {}
                 }
                 return true;
@@ -526,7 +527,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
         // Footer Clicks (y >= height - 3)
         if y >= term_height.saturating_sub(3) {
             if x < 12 {
-                app.active_tab = app.active_tab.next();
+                app.switch_tab(app.active_tab.next());
                 return true;
             } else if x >= term_width.saturating_sub(12) {
                 app.should_quit = true;

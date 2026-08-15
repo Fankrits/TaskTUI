@@ -58,6 +58,8 @@ pub struct SystemMonitor {
     pub networks: Networks,
     pub last_refresh: Instant,
     pub last_disk_refresh: Instant,
+    pub last_socket_refresh: Instant,
+    pub cached_pid_ports: HashMap<u32, Vec<u16>>,
     pub user_cache: HashMap<sysinfo::Uid, String>,
     
     // System static info
@@ -125,6 +127,8 @@ impl SystemMonitor {
             networks,
             last_refresh: now,
             last_disk_refresh: now,
+            last_socket_refresh: now.checked_sub(std::time::Duration::from_secs(5)).unwrap_or(now),
+            cached_pid_ports: HashMap::new(),
             user_cache: HashMap::new(),
             host_name,
             os_name,
@@ -230,9 +234,13 @@ impl SystemMonitor {
         }
         self.net_tx_history.push_back(self.current_net_tx_rate / 1024.0); // KB/s
 
-        // Map listening / active ports to PIDs
-        let (pid_to_ports, socket_list) = Self::collect_sockets();
-        self.sockets = socket_list;
+        // Map listening / active ports to PIDs - throttled to every 3 seconds
+        if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3) || self.sockets.is_empty() {
+            let (pid_to_ports, socket_list) = Self::collect_sockets();
+            self.cached_pid_ports = pid_to_ports;
+            self.sockets = socket_list;
+            self.last_socket_refresh = now;
+        }
 
         let system_uptime = System::uptime();
 
@@ -268,7 +276,7 @@ impl SystemMonitor {
             };
 
             let session_id = process.session_id().map(|s| s.as_u32());
-            let ports = pid_to_ports.get(&pid_u32).cloned().unwrap_or_default();
+            let ports = self.cached_pid_ports.get(&pid_u32).cloned().unwrap_or_default();
 
             let exe_path = process
                 .exe()
@@ -325,6 +333,33 @@ impl SystemMonitor {
         }
 
         self.processes = proc_list;
+    }
+
+    pub fn refresh_sockets(&mut self) {
+        let (pid_to_ports, socket_list) = Self::collect_sockets();
+        self.cached_pid_ports = pid_to_ports;
+        self.sockets = socket_list;
+        self.last_socket_refresh = Instant::now();
+
+        // Update process names for sockets using existing process list
+        for sock in &mut self.sockets {
+            let mut names = Vec::new();
+            for p in &sock.pids {
+                if let Some(proc) = self.processes.iter().find(|pr| pr.pid == *p) {
+                    names.push(proc.name.clone());
+                }
+            }
+            sock.process_names = names;
+        }
+
+        // Update ports on existing processes
+        for proc in &mut self.processes {
+            if let Some(ports) = self.cached_pid_ports.get(&proc.pid) {
+                proc.ports = ports.clone();
+            } else {
+                proc.ports.clear();
+            }
+        }
     }
 
     fn collect_sockets() -> (HashMap<u32, Vec<u16>>, Vec<NetworkSocketItem>) {
@@ -535,6 +570,35 @@ mod tests {
 
         monitor.refresh();
         assert!(monitor.last_disk_refresh > past_disk_refresh);
+    }
+
+    #[test]
+    fn test_socket_refresh_throttling() {
+        let mut monitor = SystemMonitor::new();
+
+        let first_socket_refresh = monitor.last_socket_refresh;
+
+        // Calling refresh immediately should not re-query sockets
+        monitor.refresh();
+        assert_eq!(monitor.last_socket_refresh, first_socket_refresh);
+
+        // Manually simulate 4 seconds elapsed
+        monitor.last_socket_refresh = Instant::now() - Duration::from_secs(4);
+        let past_socket_refresh = monitor.last_socket_refresh;
+
+        monitor.refresh();
+        assert!(monitor.last_socket_refresh > past_socket_refresh);
+    }
+
+    #[test]
+    fn test_force_refresh_sockets() {
+        let mut monitor = SystemMonitor::new();
+        let initial_refresh = monitor.last_socket_refresh;
+
+        std::thread::sleep(Duration::from_millis(10));
+        monitor.refresh_sockets();
+
+        assert!(monitor.last_socket_refresh > initial_refresh);
     }
 
     #[test]

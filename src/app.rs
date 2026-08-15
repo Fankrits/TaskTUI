@@ -191,11 +191,23 @@ impl App {
         app
     }
 
+    pub fn switch_tab(&mut self, tab: Tab) {
+        let previous = self.active_tab;
+        self.active_tab = tab;
+        if self.active_tab == Tab::NetworkPorts && previous != Tab::NetworkPorts {
+            self.monitor.refresh_sockets();
+            self.apply_network_filter_and_sort();
+        }
+    }
+
     pub fn on_tick(&mut self) {
         if !self.paused {
+            let prev_socket_refresh = self.monitor.last_socket_refresh;
             self.monitor.refresh();
             self.apply_process_filter_and_sort();
-            self.apply_network_filter_and_sort();
+            if self.monitor.last_socket_refresh != prev_socket_refresh {
+                self.apply_network_filter_and_sort();
+            }
         }
 
         // Clean up expired toasts (older than 4 seconds)
@@ -750,5 +762,37 @@ mod tests {
 
         let top_mem = app.get_top_memory_processes(5);
         assert!(top_mem.is_empty());
+    }
+
+    #[test]
+    fn test_switch_tab_to_network_ports_triggers_socket_refresh() {
+        let mut app = App::new();
+        let initial_refresh = app.monitor.last_socket_refresh;
+
+        std::thread::sleep(Duration::from_millis(10));
+        app.switch_tab(Tab::NetworkPorts);
+
+        assert_eq!(app.active_tab, Tab::NetworkPorts);
+        assert!(app.monitor.last_socket_refresh > initial_refresh);
+    }
+
+    #[test]
+    fn test_switch_tab_to_other_tabs_does_not_force_socket_refresh() {
+        let mut app = App::new();
+        app.switch_tab(Tab::SystemDetails);
+        let refresh_after = app.monitor.last_socket_refresh;
+
+        app.switch_tab(Tab::Help);
+        assert_eq!(app.active_tab, Tab::Help);
+        assert_eq!(app.monitor.last_socket_refresh, refresh_after);
+    }
+
+    #[test]
+    fn test_on_tick_throttles_socket_refresh() {
+        let mut app = App::new();
+        let initial_refresh = app.monitor.last_socket_refresh;
+
+        app.on_tick();
+        assert_eq!(app.monitor.last_socket_refresh, initial_refresh);
     }
 }
