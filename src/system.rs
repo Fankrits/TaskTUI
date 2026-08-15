@@ -351,12 +351,15 @@ impl SystemMonitor {
             });
         }
 
-        // Attach process names to sockets
+        // Build O(1) PID -> Name lookup
+        let pid_to_name: HashMap<u32, &str> = proc_list.iter().map(|p| (p.pid, p.name.as_str())).collect();
+
+        // Attach process names to sockets in O(S * P) instead of O(S * P * N)
         for sock in &mut self.sockets {
-            let mut names = Vec::new();
+            let mut names = Vec::with_capacity(sock.pids.len());
             for p in &sock.pids {
-                if let Some(proc) = proc_list.iter().find(|pr| pr.pid == *p) {
-                    names.push(proc.name.clone());
+                if let Some(&name) = pid_to_name.get(p) {
+                    names.push(name.to_string());
                 }
             }
             sock.process_names = names;
@@ -372,11 +375,12 @@ impl SystemMonitor {
         self.last_socket_refresh = Instant::now();
 
         // Update process names for sockets using existing process list
+        let pid_to_name: HashMap<u32, &str> = self.processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
         for sock in &mut self.sockets {
-            let mut names = Vec::new();
+            let mut names = Vec::with_capacity(sock.pids.len());
             for p in &sock.pids {
-                if let Some(proc) = self.processes.iter().find(|pr| pr.pid == *p) {
-                    names.push(proc.name.clone());
+                if let Some(&name) = pid_to_name.get(p) {
+                    names.push(name.to_string());
                 }
             }
             sock.process_names = names;
@@ -648,5 +652,17 @@ mod tests {
         assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Zombie), "Zombie");
         assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Dead), "Dead");
     }
+
+    #[test]
+    fn test_socket_process_name_association() {
+        let mut monitor = SystemMonitor::new();
+        monitor.refresh_sockets();
+        for sock in &monitor.sockets {
+            for name in &sock.process_names {
+                assert!(!name.is_empty());
+            }
+        }
+    }
 }
+
 
