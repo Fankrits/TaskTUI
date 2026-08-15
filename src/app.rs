@@ -218,7 +218,8 @@ impl App {
 
         // Clean up expired toasts (older than 4 seconds)
         let now = Instant::now();
-        self.toasts.retain(|t| now.duration_since(t.timestamp) < t.duration);
+        self.toasts
+            .retain(|t| now.duration_since(t.timestamp) < t.duration);
     }
 
     pub fn add_toast(&mut self, message: String, kind: ToastKind) {
@@ -254,12 +255,24 @@ impl App {
                 SortDirection::Descending => procs[b].pid.cmp(&procs[a].pid),
             }),
             SortColumn::Name => self.filtered_processes.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => procs[a].name.to_lowercase().cmp(&procs[b].name.to_lowercase()),
-                SortDirection::Descending => procs[b].name.to_lowercase().cmp(&procs[a].name.to_lowercase()),
+                SortDirection::Ascending => procs[a]
+                    .name
+                    .to_lowercase()
+                    .cmp(&procs[b].name.to_lowercase()),
+                SortDirection::Descending => procs[b]
+                    .name
+                    .to_lowercase()
+                    .cmp(&procs[a].name.to_lowercase()),
             }),
             SortColumn::Cpu => self.filtered_processes.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => procs[a].cpu_usage.partial_cmp(&procs[b].cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
-                SortDirection::Descending => procs[b].cpu_usage.partial_cmp(&procs[a].cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
+                SortDirection::Ascending => procs[a]
+                    .cpu_usage
+                    .partial_cmp(&procs[b].cpu_usage)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                SortDirection::Descending => procs[b]
+                    .cpu_usage
+                    .partial_cmp(&procs[a].cpu_usage)
+                    .unwrap_or(std::cmp::Ordering::Equal),
             }),
             SortColumn::Memory => self.filtered_processes.sort_by(|&a, &b| match dir {
                 SortDirection::Ascending => procs[a].memory_bytes.cmp(&procs[b].memory_bytes),
@@ -274,8 +287,14 @@ impl App {
                 }
             }),
             SortColumn::User => self.filtered_processes.sort_by(|&a, &b| match dir {
-                SortDirection::Ascending => procs[a].user.to_lowercase().cmp(&procs[b].user.to_lowercase()),
-                SortDirection::Descending => procs[b].user.to_lowercase().cmp(&procs[a].user.to_lowercase()),
+                SortDirection::Ascending => procs[a]
+                    .user
+                    .to_lowercase()
+                    .cmp(&procs[b].user.to_lowercase()),
+                SortDirection::Descending => procs[b]
+                    .user
+                    .to_lowercase()
+                    .cmp(&procs[a].user.to_lowercase()),
             }),
             SortColumn::Status => self.filtered_processes.sort_by(|&a, &b| match dir {
                 SortDirection::Ascending => procs[a].status.cmp(procs[b].status),
@@ -290,7 +309,8 @@ impl App {
             if self.selected_proc_idx >= self.filtered_processes.len() {
                 self.selected_proc_idx = self.filtered_processes.len().saturating_sub(1);
             }
-            self.process_table_state.select(Some(self.selected_proc_idx));
+            self.process_table_state
+                .select(Some(self.selected_proc_idx));
         }
     }
 
@@ -310,7 +330,9 @@ impl App {
                 || s.local_addr.to_lowercase().contains(&query)
                 || s.remote_addr.to_lowercase().contains(&query)
                 || s.pids.iter().any(|p| p.to_string().contains(&query))
-                || s.process_names.iter().any(|n| n.to_lowercase().contains(&query))
+                || s.process_names
+                    .iter()
+                    .any(|n| n.to_lowercase().contains(&query))
             {
                 self.filtered_sockets.push(idx);
             }
@@ -340,8 +362,16 @@ impl App {
                 }
             }),
             NetworkSortColumn::Name => self.filtered_sockets.sort_by(|&a, &b| {
-                let a_name = socks[a].process_names.first().map(|s| s.as_str()).unwrap_or("");
-                let b_name = socks[b].process_names.first().map(|s| s.as_str()).unwrap_or("");
+                let a_name = socks[a]
+                    .process_names
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let b_name = socks[b]
+                    .process_names
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 match dir {
                     SortDirection::Ascending => a_name.cmp(b_name),
                     SortDirection::Descending => b_name.cmp(a_name),
@@ -364,14 +394,16 @@ impl App {
         let mut cpu_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
         if cpu_indices.len() > 5 {
             cpu_indices.select_nth_unstable_by(5, |&a, &b| {
-                self.monitor.processes[b].cpu_usage
+                self.monitor.processes[b]
+                    .cpu_usage
                     .partial_cmp(&self.monitor.processes[a].cpu_usage)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             cpu_indices.truncate(5);
         }
         cpu_indices.sort_by(|&a, &b| {
-            self.monitor.processes[b].cpu_usage
+            self.monitor.processes[b]
+                .cpu_usage
                 .partial_cmp(&self.monitor.processes[a].cpu_usage)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -380,7 +412,9 @@ impl App {
         let mut mem_indices: Vec<usize> = (0..self.monitor.processes.len()).collect();
         if mem_indices.len() > 5 {
             mem_indices.select_nth_unstable_by(5, |&a, &b| {
-                self.monitor.processes[b].memory_bytes.cmp(&self.monitor.processes[a].memory_bytes)
+                self.monitor.processes[b]
+                    .memory_bytes
+                    .cmp(&self.monitor.processes[a].memory_bytes)
             });
             mem_indices.truncate(5);
         }
@@ -499,11 +533,15 @@ impl App {
     }
 
     pub fn get_selected_process(&self) -> Option<&ProcessInfo> {
-        self.filtered_processes.get(self.selected_proc_idx).and_then(|&idx| self.monitor.processes.get(idx))
+        self.filtered_processes
+            .get(self.selected_proc_idx)
+            .and_then(|&idx| self.monitor.processes.get(idx))
     }
 
     pub fn get_selected_socket(&self) -> Option<&NetworkSocketItem> {
-        self.filtered_sockets.get(self.selected_net_idx).and_then(|&idx| self.monitor.sockets.get(idx))
+        self.filtered_sockets
+            .get(self.selected_net_idx)
+            .and_then(|&idx| self.monitor.sockets.get(idx))
     }
 
     pub fn prompt_kill_selected(&mut self, force: bool) {
@@ -520,15 +558,18 @@ impl App {
         {
             match sock.pids.first() {
                 Some(&pid) => {
-                    let name = sock.process_names.first().cloned().unwrap_or_else(|| "Unknown".to_string());
-                    self.active_modal = Modal::ConfirmKill {
-                        pid,
-                        name,
-                        force,
-                    };
+                    let name = sock
+                        .process_names
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Unknown".to_string());
+                    self.active_modal = Modal::ConfirmKill { pid, name, force };
                 }
                 None => {
-                    self.add_toast("No PID associated with this port socket".to_string(), ToastKind::Error);
+                    self.add_toast(
+                        "No PID associated with this port socket".to_string(),
+                        ToastKind::Error,
+                    );
                 }
             }
         }
@@ -538,7 +579,11 @@ impl App {
         match self.monitor.kill_process(pid, force) {
             Ok(()) => {
                 self.add_toast(
-                    format!("Successfully terminated PID {} {}", pid, if force { "(Force)" } else { "" }),
+                    format!(
+                        "Successfully terminated PID {} {}",
+                        pid,
+                        if force { "(Force)" } else { "" }
+                    ),
                     ToastKind::Success,
                 );
                 self.apply_process_filter_and_sort();
@@ -546,7 +591,10 @@ impl App {
                 self.apply_network_filter_and_sort();
             }
             Err(e) => {
-                self.add_toast(format!("Failed to kill PID {}: {}", pid, e), ToastKind::Error);
+                self.add_toast(
+                    format!("Failed to kill PID {}: {}", pid, e),
+                    ToastKind::Error,
+                );
             }
         }
         self.active_modal = Modal::None;
@@ -569,6 +617,7 @@ impl App {
         format!("{} ({})", col_name, dir_str)
     }
 
+    #[allow(dead_code)]
     pub fn get_top_cpu_processes(&self, count: usize) -> Vec<&ProcessInfo> {
         let mut list: Vec<&ProcessInfo> = self.monitor.processes.iter().collect();
         if list.len() > count {
@@ -587,6 +636,7 @@ impl App {
         list
     }
 
+    #[allow(dead_code)]
     pub fn get_top_memory_processes(&self, count: usize) -> Vec<&ProcessInfo> {
         let mut list: Vec<&ProcessInfo> = self.monitor.processes.iter().collect();
         if list.len() > count {
@@ -603,7 +653,11 @@ impl App {
         } else {
             self.sort_column = col;
             self.sort_direction = match col {
-                SortColumn::Name | SortColumn::User | SortColumn::Status | SortColumn::Pid | SortColumn::Port => SortDirection::Ascending,
+                SortColumn::Name
+                | SortColumn::User
+                | SortColumn::Status
+                | SortColumn::Pid
+                | SortColumn::Port => SortDirection::Ascending,
                 SortColumn::Cpu | SortColumn::Memory => SortDirection::Descending,
             };
         }
@@ -638,7 +692,10 @@ impl App {
             SortDirection::Descending => "High → Low ▼",
             SortDirection::Ascending => "Low → High ▲",
         };
-        self.add_toast(format!("Ports sorted by: {} ({})", col_name, dir_str), ToastKind::Info);
+        self.add_toast(
+            format!("Ports sorted by: {} ({})", col_name, dir_str),
+            ToastKind::Info,
+        );
     }
 }
 

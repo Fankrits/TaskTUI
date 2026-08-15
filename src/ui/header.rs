@@ -1,9 +1,9 @@
 use crate::app::{App, Tab};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-use ratatui::Frame;
 
 pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
@@ -78,10 +78,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
                 "▶ ",
             )
         } else {
-            (
-                Style::default().fg(theme.fg_dim),
-                "  ",
-            )
+            (Style::default().fg(theme.fg_dim), "  ")
         };
 
         let label = format!("{}{} {}", prefix, icon, name);
@@ -113,10 +110,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let play_pause_widget = Paragraph::new(Line::from(vec![
         Span::styled(btn_badge, btn_style),
-        Span::styled(
-            " (Space)",
-            Style::default().fg(theme.fg_dim),
-        ),
+        Span::styled(" (Space)", Style::default().fg(theme.fg_dim)),
     ]))
     .alignment(Alignment::Center)
     .block(
@@ -135,9 +129,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let host_text = vec![Line::from(vec![
         Span::styled(
             &app.monitor.host_name,
-            Style::default()
-                .fg(theme.fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" │ ", Style::default().fg(theme.border)),
         Span::styled(

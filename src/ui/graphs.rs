@@ -1,9 +1,9 @@
 use crate::app::{App, DashboardView};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, LineGauge, Paragraph, Sparkline};
-use ratatui::Frame;
 
 pub fn render_graphs(f: &mut Frame, app: &App, area: Rect) {
     match app.dashboard_view {
@@ -216,14 +216,28 @@ fn render_network_box(f: &mut Frame, app: &App, area: Rect) {
     ]);
     f.render_widget(Paragraph::new(net_info), net_chunks[0]);
 
-    let max_rx = app.monitor.net_rx_history.iter().copied().max().unwrap_or(10).max(10);
+    let max_rx = app
+        .monitor
+        .net_rx_history
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(10)
+        .max(10);
     let rx_sparkline = Sparkline::default()
         .data(app.monitor.net_rx_history)
         .max(max_rx)
         .style(Style::default().fg(theme.success));
     f.render_widget(rx_sparkline, net_chunks[1]);
 
-    let max_tx = app.monitor.net_tx_history.iter().copied().max().unwrap_or(10).max(10);
+    let max_tx = app
+        .monitor
+        .net_tx_history
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(10)
+        .max(10);
     let tx_sparkline = Sparkline::default()
         .data(app.monitor.net_tx_history)
         .max(max_tx)
@@ -235,7 +249,11 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let theme = &app.theme;
     let block = Block::default()
         .title(" 🔥 Top CPU Consumers ")
-        .title_style(Style::default().fg(theme.danger).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(theme.danger)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.border));
@@ -246,7 +264,7 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let mut lines = Vec::new();
 
     let rank_colors = [
-        Color::Rgb(251, 191, 36), // #1 Gold
+        Color::Rgb(251, 191, 36),  // #1 Gold
         Color::Rgb(226, 232, 240), // #2 Silver
         Color::Rgb(205, 127, 50),  // #3 Bronze
         Color::Rgb(148, 163, 184), // #4 Dim
@@ -272,7 +290,10 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
             let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
 
             lines.push(Line::from(vec![
-                Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    rank_num,
+                    Style::default().fg(rank_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("{:<14}", proc_name),
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
@@ -288,7 +309,10 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled("No processes active", Style::default().fg(theme.fg_dim))));
+        lines.push(Line::from(Span::styled(
+            "No processes active",
+            Style::default().fg(theme.fg_dim),
+        )));
     }
 
     f.render_widget(Paragraph::new(lines), inner);
@@ -298,7 +322,11 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let theme = &app.theme;
     let block = Block::default()
         .title(" 🧠 Top Memory Consumers ")
-        .title_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.border));
@@ -309,7 +337,7 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     let mut lines = Vec::new();
 
     let rank_colors = [
-        Color::Rgb(251, 191, 36), // #1 Gold
+        Color::Rgb(251, 191, 36),  // #1 Gold
         Color::Rgb(226, 232, 240), // #2 Silver
         Color::Rgb(205, 127, 50),  // #3 Bronze
         Color::Rgb(148, 163, 184), // #4 Dim
@@ -337,7 +365,10 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
             let mem_str = format_memory_compact(p.memory_bytes);
 
             lines.push(Line::from(vec![
-                Span::styled(rank_num, Style::default().fg(rank_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    rank_num,
+                    Style::default().fg(rank_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("{:<14}", proc_name),
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
@@ -353,7 +384,10 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled("No processes active", Style::default().fg(theme.fg_dim))));
+        lines.push(Line::from(Span::styled(
+            "No processes active",
+            Style::default().fg(theme.fg_dim),
+        )));
     }
 
     f.render_widget(Paragraph::new(lines), inner);

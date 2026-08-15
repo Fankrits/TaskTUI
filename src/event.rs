@@ -1,5 +1,8 @@
 use crate::app::{App, DashboardView, Modal, NetworkSortColumn, SortColumn, Tab, ToastKind};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use std::time::Duration;
 
 pub fn handle_events(app: &mut App) -> Result<bool, anyhow::Error> {
@@ -53,7 +56,8 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
                     app.active_modal = Modal::None;
                 }
                 KeyCode::Char('k') | KeyCode::Char('K') => {
-                    let force = key.code == KeyCode::Char('K') || key.modifiers.contains(KeyModifiers::SHIFT);
+                    let force = key.code == KeyCode::Char('K')
+                        || key.modifiers.contains(KeyModifiers::SHIFT);
                     if let Some(proc) = app.monitor.processes.iter().find(|p| p.pid == target_pid) {
                         app.active_modal = Modal::ConfirmKill {
                             pid: target_pid,
@@ -257,7 +261,11 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Pause / Resume
         KeyCode::Char(' ') => {
             app.paused = !app.paused;
-            let msg = if app.paused { "Paused Live Refresh" } else { "Resumed Live Refresh" };
+            let msg = if app.paused {
+                "Paused Live Refresh"
+            } else {
+                "Resumed Live Refresh"
+            };
             app.add_toast(msg.to_string(), ToastKind::Info);
         }
 
@@ -274,7 +282,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
     }
 }
 
-fn get_modal_bounds(percent_x: u16, percent_y: u16, width: u16, height: u16) -> (u16, u16, u16, u16) {
+fn get_modal_bounds(
+    percent_x: u16,
+    percent_y: u16,
+    width: u16,
+    height: u16,
+) -> (u16, u16, u16, u16) {
     let pad_x = (width.saturating_sub(width * percent_x / 100)) / 2;
     let w = width * percent_x / 100;
     let pad_y = (height.saturating_sub(height * percent_y / 100)) / 2;
@@ -336,7 +349,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     match slot {
                         0 => app.execute_kill(target_pid, false), // [Y] Terminate
                         1 => app.execute_kill(target_pid, true),  // [F] Force Kill
-                        _ => app.active_modal = Modal::None,     // [Esc] Cancel
+                        _ => app.active_modal = Modal::None,      // [Esc] Cancel
                     }
                     return true;
                 }
@@ -357,7 +370,9 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     let rel_x = x.saturating_sub(mx);
                     if rel_x < mw / 2 {
                         // [k] Kill Process
-                        if let Some(proc) = app.monitor.processes.iter().find(|p| p.pid == target_pid) {
+                        if let Some(proc) =
+                            app.monitor.processes.iter().find(|p| p.pid == target_pid)
+                        {
                             app.active_modal = Modal::ConfirmKill {
                                 pid: target_pid,
                                 name: proc.name.clone(),
@@ -374,7 +389,12 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
             }
             Modal::Help => {
                 let (mx, my, mw, mh) = get_modal_bounds(65, 70, term_width, term_height);
-                if x < mx || x >= mx + mw || y < my || y >= my + mh || y >= my + mh.saturating_sub(3) {
+                if x < mx
+                    || x >= mx + mw
+                    || y < my
+                    || y >= my + mh
+                    || y >= my + mh.saturating_sub(3)
+                {
                     app.active_modal = Modal::None;
                     return true;
                 }
@@ -406,13 +426,21 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
             } else if x >= btn_start && x < host_start {
                 // Clicked Play / Pause Button
                 app.paused = !app.paused;
-                let msg = if app.paused { "⏸ Paused Live Refresh" } else { "▶ Resumed Live Refresh" };
+                let msg = if app.paused {
+                    "⏸ Paused Live Refresh"
+                } else {
+                    "▶ Resumed Live Refresh"
+                };
                 app.add_toast(msg.to_string(), ToastKind::Info);
                 return true;
             } else if x >= host_start {
                 // Clicked Host block
                 app.paused = !app.paused;
-                let msg = if app.paused { "⏸ Paused Live Refresh" } else { "▶ Resumed Live Refresh" };
+                let msg = if app.paused {
+                    "⏸ Paused Live Refresh"
+                } else {
+                    "▶ Resumed Live Refresh"
+                };
                 app.add_toast(msg.to_string(), ToastKind::Info);
                 return true;
             }
@@ -491,7 +519,11 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     if target_idx < app.filtered_processes.len() {
                         if app.selected_proc_idx == target_idx {
                             // Clicked already selected process -> open details inspector!
-                            if let Some(proc) = app.filtered_processes.get(target_idx).and_then(|&idx| app.monitor.processes.get(idx)) {
+                            if let Some(proc) = app
+                                .filtered_processes
+                                .get(target_idx)
+                                .and_then(|&idx| app.monitor.processes.get(idx))
+                            {
                                 app.active_modal = Modal::ProcessDetails(proc.pid);
                             }
                         } else {
@@ -505,7 +537,12 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     let target_idx = app.network_table_state.offset() + row_offset;
                     if target_idx < app.filtered_sockets.len() {
                         if app.selected_net_idx == target_idx {
-                            if let Some(&pid) = app.filtered_sockets.get(target_idx).and_then(|&idx| app.monitor.sockets.get(idx)).and_then(|s| s.pids.first()) {
+                            if let Some(&pid) = app
+                                .filtered_sockets
+                                .get(target_idx)
+                                .and_then(|&idx| app.monitor.sockets.get(idx))
+                                .and_then(|s| s.pids.first())
+                            {
                                 app.active_modal = Modal::ProcessDetails(pid);
                             }
                         } else {
@@ -602,8 +639,10 @@ mod tests {
     fn test_key_quit() {
         let mut app = App::new();
         assert!(!app.should_quit);
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+        );
         assert!(app.should_quit);
     }
 }
-

@@ -1,9 +1,9 @@
 use crate::app::{App, Tab};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-use ratatui::Frame;
 
 pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
@@ -49,7 +49,10 @@ pub fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    hints.extend(key_hint("Space", if app.paused { "Resume" } else { "Pause" }));
+    hints.extend(key_hint(
+        "Space",
+        if app.paused { "Resume" } else { "Pause" },
+    ));
     hints.extend(key_hint("?", "Help"));
     hints.extend(key_hint("q", "Quit"));
 

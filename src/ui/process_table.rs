@@ -1,9 +1,9 @@
 use crate::app::{App, SortColumn, SortDirection};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
-use ratatui::Frame;
 
 pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
@@ -35,7 +35,10 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
         let display_text = if app.search_query.is_empty() {
             if app.search_active {
                 Line::from(vec![
-                    Span::styled("Type name, PID, port, or user...", Style::default().fg(theme.fg_dim)),
+                    Span::styled(
+                        "Type name, PID, port, or user...",
+                        Style::default().fg(theme.fg_dim),
+                    ),
                     Span::styled("█", Style::default().fg(theme.primary)),
                 ])
             } else {
@@ -49,11 +52,26 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(" (Press ", Style::default().fg(theme.fg_dim)),
-                    Span::styled("r", Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "r",
+                        Style::default()
+                            .fg(theme.warning)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" to invert Low⇄High, ", Style::default().fg(theme.fg_dim)),
-                    Span::styled("m/c/p/n/o", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "m/c/p/n/o",
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" to sort, ", Style::default().fg(theme.fg_dim)),
-                    Span::styled("/", Style::default().fg(theme.success).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "/",
+                        Style::default()
+                            .fg(theme.success)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" to search)", Style::default().fg(theme.fg_dim)),
                 ])
             }
@@ -61,10 +79,17 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
             let cursor = if app.search_active { "█" } else { "" };
             Line::from(vec![
                 Span::styled("Query: ", Style::default().fg(theme.primary)),
-                Span::styled(&app.search_query, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &app.search_query,
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(cursor, Style::default().fg(theme.primary)),
                 Span::styled(
-                    format!("  ({} matching)  │  Sort: {}", app.filtered_processes.len(), sort_summary),
+                    format!(
+                        "  ({} matching)  │  Sort: {}",
+                        app.filtered_processes.len(),
+                        sort_summary
+                    ),
                     Style::default().fg(theme.fg_dim),
                 ),
             ])
@@ -119,51 +144,85 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
             .height(1)
             .bottom_margin(0);
 
-        let rows = app.filtered_processes.iter().enumerate().map(|(display_idx, &real_idx)| {
-            let p = &app.monitor.processes[real_idx];
-            let is_even = display_idx % 2 == 0;
-            let row_bg = if is_even {
-                Color::Rgb(15, 23, 42)
-            } else {
-                Color::Rgb(20, 30, 55)
-            };
+        let rows = app
+            .filtered_processes
+            .iter()
+            .enumerate()
+            .map(|(display_idx, &real_idx)| {
+                let p = &app.monitor.processes[real_idx];
+                let is_even = display_idx % 2 == 0;
+                let row_bg = if is_even {
+                    Color::Rgb(15, 23, 42)
+                } else {
+                    Color::Rgb(20, 30, 55)
+                };
 
-            let cpu_color = theme.cpu_color(p.cpu_usage);
-            let mem_color = theme.memory_color(p.memory_percent);
+                let cpu_color = theme.cpu_color(p.cpu_usage);
+                let mem_color = theme.memory_color(p.memory_percent);
 
-            let status_icon = match p.status {
-                "Run" => "● Run",
-                "Sleep" => "○ Slp",
-                "Idle" => "▲ Idl",
-                "Zombie" | "Dead" => "✕ Ded",
-                _ => "• Oth",
-            };
+                let status_icon = match p.status {
+                    "Run" => "● Run",
+                    "Sleep" => "○ Slp",
+                    "Idle" => "▲ Idl",
+                    "Zombie" | "Dead" => "✕ Ded",
+                    _ => "• Oth",
+                };
 
-            let ports_str = if p.ports.is_empty() {
-                "-".to_string()
-            } else {
-                p.ports.iter().take(3).map(|port| format!(":{}", port)).collect::<Vec<_>>().join(", ")
-            };
+                let ports_str = if p.ports.is_empty() {
+                    "-".to_string()
+                } else {
+                    p.ports
+                        .iter()
+                        .take(3)
+                        .map(|port| format!(":{}", port))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
 
-            let user_sess = match p.session_id {
-                Some(sess) => format!("{} (S:{})", p.user, sess),
-                None => p.user.clone(),
-            };
+                let user_sess = match p.session_id {
+                    Some(sess) => format!("{} (S:{})", p.user, sess),
+                    None => p.user.clone(),
+                };
 
-            let cells = vec![
-                Cell::from(Span::styled(p.pid.to_string(), Style::default().fg(theme.primary))),
-                Cell::from(Span::styled(&p.name, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD))),
-                Cell::from(Span::styled(format!("{:>5.1}%", p.cpu_usage), Style::default().fg(cpu_color).add_modifier(Modifier::BOLD))),
-                Cell::from(Span::styled(format_memory(p.memory_bytes), Style::default().fg(theme.fg))),
-                Cell::from(Span::styled(format!("{:>4.1}%", p.memory_percent), Style::default().fg(mem_color))),
-                Cell::from(Span::styled(ports_str, Style::default().fg(if p.ports.is_empty() { theme.fg_dim } else { theme.warning }))),
-                Cell::from(Span::styled(status_icon, Style::default().fg(theme.status_color(p.status)))),
-                Cell::from(Span::styled(user_sess, Style::default().fg(theme.fg_dim))),
-                Cell::from(Span::styled(&p.cmd, Style::default().fg(theme.fg_dim))),
-            ];
+                let cells = vec![
+                    Cell::from(Span::styled(
+                        p.pid.to_string(),
+                        Style::default().fg(theme.primary),
+                    )),
+                    Cell::from(Span::styled(
+                        &p.name,
+                        Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                    )),
+                    Cell::from(Span::styled(
+                        format!("{:>5.1}%", p.cpu_usage),
+                        Style::default().fg(cpu_color).add_modifier(Modifier::BOLD),
+                    )),
+                    Cell::from(Span::styled(
+                        format_memory(p.memory_bytes),
+                        Style::default().fg(theme.fg),
+                    )),
+                    Cell::from(Span::styled(
+                        format!("{:>4.1}%", p.memory_percent),
+                        Style::default().fg(mem_color),
+                    )),
+                    Cell::from(Span::styled(
+                        ports_str,
+                        Style::default().fg(if p.ports.is_empty() {
+                            theme.fg_dim
+                        } else {
+                            theme.warning
+                        }),
+                    )),
+                    Cell::from(Span::styled(
+                        status_icon,
+                        Style::default().fg(theme.status_color(p.status)),
+                    )),
+                    Cell::from(Span::styled(user_sess, Style::default().fg(theme.fg_dim))),
+                    Cell::from(Span::styled(&p.cmd, Style::default().fg(theme.fg_dim))),
+                ];
 
-            Row::new(cells).style(Style::default().bg(row_bg)).height(1)
-        });
+                Row::new(cells).style(Style::default().bg(row_bg)).height(1)
+            });
 
         let selected_pid_str = app
             .get_selected_process()
@@ -195,7 +254,11 @@ pub fn render_process_table(f: &mut Frame, app: &mut App, area: Rect) {
         .block(
             Block::default()
                 .title(table_title)
-                .title_style(Style::default().fg(theme.primary).add_modifier(Modifier::BOLD))
+                .title_style(
+                    Style::default()
+                        .fg(theme.primary)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.border_focused)),

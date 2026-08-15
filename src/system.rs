@@ -1,11 +1,9 @@
+use netstat2::{AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState, get_sockets_info};
 use std::collections::HashMap;
 use std::time::Instant;
 use sysinfo::{
     CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
     RefreshKind, System, UpdateKind, Users,
-};
-use netstat2::{
-    get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
 };
 
 pub const HISTORY_LEN: usize = 60;
@@ -62,7 +60,7 @@ pub struct SystemMonitor {
     pub last_socket_refresh: Instant,
     pub cached_pid_ports: HashMap<u32, Vec<u16>>,
     pub user_cache: HashMap<sysinfo::Uid, String>,
-    
+
     // System static info
     pub host_name: String,
     pub os_name: String,
@@ -153,7 +151,9 @@ impl SystemMonitor {
             networks,
             last_refresh: now,
             last_disk_refresh: now,
-            last_socket_refresh: now.checked_sub(std::time::Duration::from_secs(5)).unwrap_or(now),
+            last_socket_refresh: now
+                .checked_sub(std::time::Duration::from_secs(5))
+                .unwrap_or(now),
             cached_pid_ports: HashMap::new(),
             user_cache: HashMap::new(),
             host_name,
@@ -222,7 +222,8 @@ impl SystemMonitor {
         // Shift and push to fixed arrays
         let cpu_val = (self.global_cpu.clamp(0.0, 100.0)).round() as u64;
         let mem_val = if self.total_memory > 0 {
-            ((self.used_memory as f64 / self.total_memory as f64 * 100.0).clamp(0.0, 100.0)).round() as u64
+            ((self.used_memory as f64 / self.total_memory as f64 * 100.0).clamp(0.0, 100.0)).round()
+                as u64
         } else {
             0
         };
@@ -260,7 +261,9 @@ impl SystemMonitor {
         self.net_tx_history[HISTORY_LEN - 1] = tx_kb;
 
         // Map listening / active ports to PIDs - throttled to every 3 seconds
-        if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3) || self.sockets.is_empty() {
+        if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3)
+            || self.sockets.is_empty()
+        {
             let (pid_to_ports, socket_list) = Self::collect_sockets();
             self.cached_pid_ports = pid_to_ports;
             self.sockets = socket_list;
@@ -301,7 +304,11 @@ impl SystemMonitor {
             };
 
             let session_id = process.session_id().map(|s| s.as_u32());
-            let ports = self.cached_pid_ports.get(&pid_u32).cloned().unwrap_or_default();
+            let ports = self
+                .cached_pid_ports
+                .get(&pid_u32)
+                .cloned()
+                .unwrap_or_default();
 
             let exe_path = process
                 .exe()
@@ -347,7 +354,8 @@ impl SystemMonitor {
         }
 
         // Build O(1) PID -> Name lookup
-        let pid_to_name: HashMap<u32, &str> = proc_list.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        let pid_to_name: HashMap<u32, &str> =
+            proc_list.iter().map(|p| (p.pid, p.name.as_str())).collect();
 
         // Attach process names to sockets in O(S * P) instead of O(S * P * N)
         for sock in &mut self.sockets {
@@ -370,7 +378,11 @@ impl SystemMonitor {
         self.last_socket_refresh = Instant::now();
 
         // Update process names for sockets using existing process list
-        let pid_to_name: HashMap<u32, &str> = self.processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        let pid_to_name: HashMap<u32, &str> = self
+            .processes
+            .iter()
+            .map(|p| (p.pid, p.name.as_str()))
+            .collect();
         for sock in &mut self.sockets {
             let mut names = Vec::with_capacity(sock.pids.len());
             for p in &sock.pids {
@@ -654,11 +666,26 @@ mod tests {
 
     #[test]
     fn test_status_mapping_static_str() {
-        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Run), "Run");
-        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Sleep), "Sleep");
-        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Idle), "Idle");
-        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Zombie), "Zombie");
-        assert_eq!(SystemMonitor::map_status(sysinfo::ProcessStatus::Dead), "Dead");
+        assert_eq!(
+            SystemMonitor::map_status(sysinfo::ProcessStatus::Run),
+            "Run"
+        );
+        assert_eq!(
+            SystemMonitor::map_status(sysinfo::ProcessStatus::Sleep),
+            "Sleep"
+        );
+        assert_eq!(
+            SystemMonitor::map_status(sysinfo::ProcessStatus::Idle),
+            "Idle"
+        );
+        assert_eq!(
+            SystemMonitor::map_status(sysinfo::ProcessStatus::Zombie),
+            "Zombie"
+        );
+        assert_eq!(
+            SystemMonitor::map_status(sysinfo::ProcessStatus::Dead),
+            "Dead"
+        );
     }
 
     #[test]
@@ -672,5 +699,3 @@ mod tests {
         }
     }
 }
-
-

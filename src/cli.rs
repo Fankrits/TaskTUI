@@ -62,9 +62,14 @@ pub fn run_update() -> Result<(), anyhow::Error> {
         if status.success() {
             println!("\n\x1b[1;32m✅ TaskTUI has been successfully updated!\x1b[0m");
         } else {
-            eprintln!("\n\x1b[1;31m❌ Update failed with exit code: {:?}\x1b[0m", status.code());
+            eprintln!(
+                "\n\x1b[1;31m❌ Update failed with exit code: {:?}\x1b[0m",
+                status.code()
+            );
             eprintln!("You can manually update anytime with:");
-            eprintln!("  curl -fsSL https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.sh | sh");
+            eprintln!(
+                "  curl -fsSL https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.sh | sh"
+            );
         }
     }
 
@@ -79,9 +84,14 @@ pub fn run_update() -> Result<(), anyhow::Error> {
         if status.success() {
             println!("\n\x1b[1;32m✅ TaskTUI has been successfully updated!\x1b[0m");
         } else {
-            eprintln!("\n\x1b[1;31m❌ Update failed with exit code: {:?}\x1b[0m", status.code());
+            eprintln!(
+                "\n\x1b[1;31m❌ Update failed with exit code: {:?}\x1b[0m",
+                status.code()
+            );
             eprintln!("You can manually update anytime with:");
-            eprintln!("  irm https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.ps1 | iex");
+            eprintln!(
+                "  irm https://raw.githubusercontent.com/Fankrits/TaskTUI/main/install.ps1 | iex"
+            );
         }
     }
 
@@ -136,7 +146,9 @@ pub fn run_uninstall(skip_confirm: bool) -> Result<(), anyhow::Error> {
     }
 
     if targets_to_remove.is_empty() {
-        println!("\x1b[1;33mNotice:\x1b[0m No TaskTUI binaries found in standard installation paths.");
+        println!(
+            "\x1b[1;33mNotice:\x1b[0m No TaskTUI binaries found in standard installation paths."
+        );
         return Ok(());
     }
 
@@ -168,10 +180,16 @@ pub fn run_uninstall(skip_confirm: bool) -> Result<(), anyhow::Error> {
                 removed_count += 1;
             }
             Ok(false) => {
-                println!("  \x1b[1;33m-\x1b[0m Skipped (already removed) {}", path.display());
+                println!(
+                    "  \x1b[1;33m-\x1b[0m Skipped (already removed) {}",
+                    path.display()
+                );
             }
             Err(e) => {
-                eprintln!("  \x1b[1;31m✖\x1b[0m Failed to remove {}: {e}", path.display());
+                eprintln!(
+                    "  \x1b[1;31m✖\x1b[0m Failed to remove {}: {e}",
+                    path.display()
+                );
             }
         }
     }
@@ -205,7 +223,10 @@ fn remove_target_file(path: &Path) -> Result<bool, anyhow::Error> {
         #[cfg(not(target_os = "windows"))]
         {
             if err.kind() == std::io::ErrorKind::PermissionDenied {
-                println!("  \x1b[33mElevated permission needed for {}, trying sudo...\x1b[0m", path.display());
+                println!(
+                    "  \x1b[33mElevated permission needed for {}, trying sudo...\x1b[0m",
+                    path.display()
+                );
                 let status = Command::new("sudo")
                     .arg("rm")
                     .arg("-f")

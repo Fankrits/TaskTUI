@@ -8,17 +8,17 @@ pub mod process_table;
 pub mod system_info;
 
 use crate::app::{App, Tab};
-use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     if app.active_tab == Tab::Help {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header
+                Constraint::Length(3), // Header
                 Constraint::Min(10),   // Full-page Help & Guide Area
-                Constraint::Length(3),  // Footer / Shortcuts
+                Constraint::Length(3), // Footer / Shortcuts
             ])
             .split(f.area());
 
@@ -39,10 +39,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Length(8),  // Graphs / Metrics Dashboard
+            Constraint::Length(3), // Header
+            Constraint::Length(8), // Graphs / Metrics Dashboard
             Constraint::Min(10),   // Main Tab Content Area
-            Constraint::Length(3),  // Footer / Shortcuts
+            Constraint::Length(3), // Footer / Shortcuts
         ])
         .split(f.area());
 
@@ -79,13 +79,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
 mod tests {
     use super::*;
     use crate::app::{DashboardView, Modal, ToastKind};
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn test_render_all_tabs_various_sizes() {
         let sizes = [(80, 24), (120, 40), (200, 60), (60, 20)];
-        let tabs = [Tab::Processes, Tab::NetworkPorts, Tab::SystemDetails, Tab::Help];
+        let tabs = [
+            Tab::Processes,
+            Tab::NetworkPorts,
+            Tab::SystemDetails,
+            Tab::Help,
+        ];
 
         for &(w, h) in &sizes {
             let backend = TestBackend::new(w, h);
