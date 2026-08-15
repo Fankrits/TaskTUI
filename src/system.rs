@@ -106,8 +106,8 @@ impl SystemMonitor {
 
         let host_name = System::host_name().unwrap_or_else(|| "Unknown".to_string());
         let os_name = System::name().unwrap_or_else(|| "Unknown OS".to_string());
-        let os_version = System::os_version().unwrap_or_else(|| "".to_string());
-        let kernel_version = System::kernel_version().unwrap_or_else(|| "".to_string());
+        let os_version = System::os_version().unwrap_or_default();
+        let kernel_version = System::kernel_version().unwrap_or_default();
 
         let cpu_brand = sys
             .cpus()
@@ -291,11 +291,7 @@ impl SystemMonitor {
                 .join(" ");
 
             let start_time = process.start_time();
-            let run_time_secs = if system_uptime >= start_time {
-                system_uptime - start_time
-            } else {
-                0
-            };
+            let run_time_secs = system_uptime.saturating_sub(start_time);
 
             let disk_usage = process.disk_usage();
             let disk_read_bytes = disk_usage.read_bytes;

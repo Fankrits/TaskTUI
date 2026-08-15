@@ -74,3 +74,79 @@ pub fn render(f: &mut Frame, app: &mut App) {
     // 5. Render Any Active Popups / Modals / Toasts on top
     modals::render_modals(f, app);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{DashboardView, Modal, ToastKind};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn test_render_all_tabs_various_sizes() {
+        let sizes = [(80, 24), (120, 40), (200, 60), (60, 20)];
+        let tabs = [Tab::Processes, Tab::NetworkPorts, Tab::SystemDetails, Tab::Help];
+
+        for &(w, h) in &sizes {
+            let backend = TestBackend::new(w, h);
+            let mut terminal = Terminal::new(backend).unwrap();
+
+            for &tab in &tabs {
+                let mut app = App::new();
+                app.switch_tab(tab);
+
+                terminal.draw(|f| render(f, &mut app)).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_all_dashboard_views() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let views = [
+            DashboardView::Combined,
+            DashboardView::TopRank,
+            DashboardView::GraphsOnly,
+        ];
+
+        for &view in &views {
+            let mut app = App::new();
+            app.dashboard_view = view;
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_render_modals_and_toasts() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let modals = [
+            Modal::None,
+            Modal::ConfirmKill {
+                pid: 1234,
+                name: "test_process".to_string(),
+                force: false,
+            },
+            Modal::ConfirmKill {
+                pid: 1234,
+                name: "test_process".to_string(),
+                force: true,
+            },
+            Modal::ProcessDetails(1234),
+            Modal::Help,
+        ];
+
+        for modal in modals {
+            let mut app = App::new();
+            app.active_modal = modal;
+            app.add_toast("Test Toast Success".to_string(), ToastKind::Success);
+            app.add_toast("Test Toast Error".to_string(), ToastKind::Error);
+            app.add_toast("Test Toast Info".to_string(), ToastKind::Info);
+
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+        }
+    }
+}

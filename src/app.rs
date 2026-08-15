@@ -391,27 +391,23 @@ impl App {
 
     pub fn next_row(&mut self) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    let i = if self.selected_proc_idx + 1 < self.filtered_processes.len() {
-                        self.selected_proc_idx + 1
-                    } else {
-                        0
-                    };
-                    self.selected_proc_idx = i;
-                    self.process_table_state.select(Some(i));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                let i = if self.selected_proc_idx + 1 < self.filtered_processes.len() {
+                    self.selected_proc_idx + 1
+                } else {
+                    0
+                };
+                self.selected_proc_idx = i;
+                self.process_table_state.select(Some(i));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    let i = if self.selected_net_idx + 1 < self.filtered_sockets.len() {
-                        self.selected_net_idx + 1
-                    } else {
-                        0
-                    };
-                    self.selected_net_idx = i;
-                    self.network_table_state.select(Some(i));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                let i = if self.selected_net_idx + 1 < self.filtered_sockets.len() {
+                    self.selected_net_idx + 1
+                } else {
+                    0
+                };
+                self.selected_net_idx = i;
+                self.network_table_state.select(Some(i));
             }
             _ => {}
         }
@@ -419,27 +415,23 @@ impl App {
 
     pub fn prev_row(&mut self) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    let i = if self.selected_proc_idx > 0 {
-                        self.selected_proc_idx - 1
-                    } else {
-                        self.filtered_processes.len().saturating_sub(1)
-                    };
-                    self.selected_proc_idx = i;
-                    self.process_table_state.select(Some(i));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                let i = if self.selected_proc_idx > 0 {
+                    self.selected_proc_idx - 1
+                } else {
+                    self.filtered_processes.len().saturating_sub(1)
+                };
+                self.selected_proc_idx = i;
+                self.process_table_state.select(Some(i));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    let i = if self.selected_net_idx > 0 {
-                        self.selected_net_idx - 1
-                    } else {
-                        self.filtered_sockets.len().saturating_sub(1)
-                    };
-                    self.selected_net_idx = i;
-                    self.network_table_state.select(Some(i));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                let i = if self.selected_net_idx > 0 {
+                    self.selected_net_idx - 1
+                } else {
+                    self.filtered_sockets.len().saturating_sub(1)
+                };
+                self.selected_net_idx = i;
+                self.network_table_state.select(Some(i));
             }
             _ => {}
         }
@@ -447,19 +439,15 @@ impl App {
 
     pub fn page_down(&mut self, page_size: usize) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    let i = (self.selected_proc_idx + page_size).min(self.filtered_processes.len() - 1);
-                    self.selected_proc_idx = i;
-                    self.process_table_state.select(Some(i));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                let i = (self.selected_proc_idx + page_size).min(self.filtered_processes.len() - 1);
+                self.selected_proc_idx = i;
+                self.process_table_state.select(Some(i));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    let i = (self.selected_net_idx + page_size).min(self.filtered_sockets.len() - 1);
-                    self.selected_net_idx = i;
-                    self.network_table_state.select(Some(i));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                let i = (self.selected_net_idx + page_size).min(self.filtered_sockets.len() - 1);
+                self.selected_net_idx = i;
+                self.network_table_state.select(Some(i));
             }
             _ => {}
         }
@@ -467,19 +455,15 @@ impl App {
 
     pub fn page_up(&mut self, page_size: usize) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    let i = self.selected_proc_idx.saturating_sub(page_size);
-                    self.selected_proc_idx = i;
-                    self.process_table_state.select(Some(i));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                let i = self.selected_proc_idx.saturating_sub(page_size);
+                self.selected_proc_idx = i;
+                self.process_table_state.select(Some(i));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    let i = self.selected_net_idx.saturating_sub(page_size);
-                    self.selected_net_idx = i;
-                    self.network_table_state.select(Some(i));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                let i = self.selected_net_idx.saturating_sub(page_size);
+                self.selected_net_idx = i;
+                self.network_table_state.select(Some(i));
             }
             _ => {}
         }
@@ -487,17 +471,13 @@ impl App {
 
     pub fn select_first(&mut self) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    self.selected_proc_idx = 0;
-                    self.process_table_state.select(Some(0));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                self.selected_proc_idx = 0;
+                self.process_table_state.select(Some(0));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    self.selected_net_idx = 0;
-                    self.network_table_state.select(Some(0));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                self.selected_net_idx = 0;
+                self.network_table_state.select(Some(0));
             }
             _ => {}
         }
@@ -505,19 +485,15 @@ impl App {
 
     pub fn select_last(&mut self) {
         match self.active_tab {
-            Tab::Processes => {
-                if !self.filtered_processes.is_empty() {
-                    let i = self.filtered_processes.len() - 1;
-                    self.selected_proc_idx = i;
-                    self.process_table_state.select(Some(i));
-                }
+            Tab::Processes if !self.filtered_processes.is_empty() => {
+                let i = self.filtered_processes.len() - 1;
+                self.selected_proc_idx = i;
+                self.process_table_state.select(Some(i));
             }
-            Tab::NetworkPorts => {
-                if !self.filtered_sockets.is_empty() {
-                    let i = self.filtered_sockets.len() - 1;
-                    self.selected_net_idx = i;
-                    self.network_table_state.select(Some(i));
-                }
+            Tab::NetworkPorts if !self.filtered_sockets.is_empty() => {
+                let i = self.filtered_sockets.len() - 1;
+                self.selected_net_idx = i;
+                self.network_table_state.select(Some(i));
             }
             _ => {}
         }
@@ -540,16 +516,19 @@ impl App {
                     force,
                 };
             }
-        } else if self.active_tab == Tab::NetworkPorts {
-            if let Some(sock) = self.get_selected_socket() {
-                if let Some(&pid) = sock.pids.first() {
+        } else if self.active_tab == Tab::NetworkPorts
+            && let Some(sock) = self.get_selected_socket()
+        {
+            match sock.pids.first() {
+                Some(&pid) => {
                     let name = sock.process_names.first().cloned().unwrap_or_else(|| "Unknown".to_string());
                     self.active_modal = Modal::ConfirmKill {
                         pid,
                         name,
                         force,
                     };
-                } else {
+                }
+                None => {
                     self.add_toast("No PID associated with this port socket".to_string(), ToastKind::Error);
                 }
             }
@@ -614,7 +593,7 @@ impl App {
             list.select_nth_unstable_by(count, |a, b| b.memory_bytes.cmp(&a.memory_bytes));
             list.truncate(count);
         }
-        list.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+        list.sort_by_key(|b| std::cmp::Reverse(b.memory_bytes));
         list
     }
 

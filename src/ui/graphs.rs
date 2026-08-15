@@ -293,7 +293,7 @@ fn render_top_cpu_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
 
         let cpu_color = theme.cpu_color(p.cpu_usage);
         let bar_width = 8;
-        let filled = ((p.cpu_usage / 100.0) * bar_width as f32).round() as usize;
+        let filled = ((p.cpu_usage.max(0.0) / 100.0) * bar_width as f32).round() as usize;
         let filled = filled.min(bar_width);
         let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
 
@@ -355,7 +355,7 @@ fn render_top_memory_rank(f: &mut Frame, app: &App, area: Rect, limit: usize) {
 
         let mem_color = theme.memory_color(p.memory_percent);
         let bar_width = 8;
-        let filled = ((p.memory_percent / 100.0) * bar_width as f32).round() as usize;
+        let filled = ((p.memory_percent.max(0.0) / 100.0) * bar_width as f32).round() as usize;
         let filled = filled.min(bar_width);
         let bar_str = format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled));
 

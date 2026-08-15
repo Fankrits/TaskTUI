@@ -1,0 +1,242 @@
+diff --git a/src/app.rs b/src/app.rs
+index 53a2566..e99c74c 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -191,11 +191,23 @@ impl App {
+         app
+     }
+ 
++    pub fn switch_tab(&mut self, tab: Tab) {
++        let previous = self.active_tab;
++        self.active_tab = tab;
++        if self.active_tab == Tab::NetworkPorts && previous != Tab::NetworkPorts {
++            self.monitor.refresh_sockets();
++            self.apply_network_filter_and_sort();
++        }
++    }
++
+     pub fn on_tick(&mut self) {
+         if !self.paused {
++            let prev_socket_refresh = self.monitor.last_socket_refresh;
+             self.monitor.refresh();
+             self.apply_process_filter_and_sort();
+-            self.apply_network_filter_and_sort();
++            if self.monitor.last_socket_refresh != prev_socket_refresh {
++                self.apply_network_filter_and_sort();
++            }
+         }
+ 
+         // Clean up expired toasts (older than 4 seconds)
+@@ -751,4 +763,36 @@ mod tests {
+         let top_mem = app.get_top_memory_processes(5);
+         assert!(top_mem.is_empty());
+     }
++
++    #[test]
++    fn test_switch_tab_to_network_ports_triggers_socket_refresh() {
++        let mut app = App::new();
++        let initial_refresh = app.monitor.last_socket_refresh;
++
++        std::thread::sleep(Duration::from_millis(10));
++        app.switch_tab(Tab::NetworkPorts);
++
++        assert_eq!(app.active_tab, Tab::NetworkPorts);
++        assert!(app.monitor.last_socket_refresh > initial_refresh);
++    }
++
++    #[test]
++    fn test_switch_tab_to_other_tabs_does_not_force_socket_refresh() {
++        let mut app = App::new();
++        app.switch_tab(Tab::SystemDetails);
++        let refresh_after = app.monitor.last_socket_refresh;
++
++        app.switch_tab(Tab::Help);
++        assert_eq!(app.active_tab, Tab::Help);
++        assert_eq!(app.monitor.last_socket_refresh, refresh_after);
++    }
++
++    #[test]
++    fn test_on_tick_throttles_socket_refresh() {
++        let mut app = App::new();
++        let initial_refresh = app.monitor.last_socket_refresh;
++
++        app.on_tick();
++        assert_eq!(app.monitor.last_socket_refresh, initial_refresh);
++    }
+ }
+diff --git a/src/event.rs b/src/event.rs
+index 2f85acb..b658876 100644
+--- a/src/event.rs
++++ b/src/event.rs
+@@ -134,15 +134,15 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
+ 
+         // Tab Navigation
+         KeyCode::Tab => {
+-            app.active_tab = app.active_tab.next();
++            app.switch_tab(app.active_tab.next());
+         }
+         KeyCode::BackTab => {
+-            app.active_tab = app.active_tab.prev();
++            app.switch_tab(app.active_tab.prev());
+         }
+-        KeyCode::Char('1') => app.active_tab = Tab::Processes,
+-        KeyCode::Char('2') => app.active_tab = Tab::NetworkPorts,
+-        KeyCode::Char('3') => app.active_tab = Tab::SystemDetails,
+-        KeyCode::Char('4') => app.active_tab = Tab::Help,
++        KeyCode::Char('1') => app.switch_tab(Tab::Processes),
++        KeyCode::Char('2') => app.switch_tab(Tab::NetworkPorts),
++        KeyCode::Char('3') => app.switch_tab(Tab::SystemDetails),
++        KeyCode::Char('4') => app.switch_tab(Tab::Help),
+ 
+         // Vertical row navigation
+         KeyCode::Down | KeyCode::Char('j') => {
+@@ -266,6 +266,7 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
+         // Manual Refresh
+         KeyCode::F(5) => {
+             app.monitor.refresh();
++            app.monitor.refresh_sockets();
+             app.apply_process_filter_and_sort();
+             app.apply_network_filter_and_sort();
+             app.add_toast("Refreshed data".to_string(), ToastKind::Info);
+@@ -397,10 +398,10 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
+                 let rel_x = x - brand_width;
+                 let tab_idx = (rel_x * 4 / tab_area_width.max(1)).min(3);
+                 match tab_idx {
+-                    0 => app.active_tab = Tab::Processes,
+-                    1 => app.active_tab = Tab::NetworkPorts,
+-                    2 => app.active_tab = Tab::SystemDetails,
+-                    3 => app.active_tab = Tab::Help,
++                    0 => app.switch_tab(Tab::Processes),
++                    1 => app.switch_tab(Tab::NetworkPorts),
++                    2 => app.switch_tab(Tab::SystemDetails),
++                    3 => app.switch_tab(Tab::Help),
+                     _ => {}
+                 }
+                 return true;
+@@ -526,7 +527,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
+         // Footer Clicks (y >= height - 3)
+         if y >= term_height.saturating_sub(3) {
+             if x < 12 {
+-                app.active_tab = app.active_tab.next();
++                app.switch_tab(app.active_tab.next());
+                 return true;
+             } else if x >= term_width.saturating_sub(12) {
+                 app.should_quit = true;
+diff --git a/src/system.rs b/src/system.rs
+index 5cb182f..875bba8 100644
+--- a/src/system.rs
++++ b/src/system.rs
+@@ -58,6 +58,8 @@ pub struct SystemMonitor {
+     pub networks: Networks,
+     pub last_refresh: Instant,
+     pub last_disk_refresh: Instant,
++    pub last_socket_refresh: Instant,
++    pub cached_pid_ports: HashMap<u32, Vec<u16>>,
+     pub user_cache: HashMap<sysinfo::Uid, String>,
+     
+     // System static info
+@@ -125,6 +127,8 @@ impl SystemMonitor {
+             networks,
+             last_refresh: now,
+             last_disk_refresh: now,
++            last_socket_refresh: now.checked_sub(std::time::Duration::from_secs(5)).unwrap_or(now),
++            cached_pid_ports: HashMap::new(),
+             user_cache: HashMap::new(),
+             host_name,
+             os_name,
+@@ -230,9 +234,13 @@ impl SystemMonitor {
+         }
+         self.net_tx_history.push_back(self.current_net_tx_rate / 1024.0); // KB/s
+ 
+-        // Map listening / active ports to PIDs
+-        let (pid_to_ports, socket_list) = Self::collect_sockets();
+-        self.sockets = socket_list;
++        // Map listening / active ports to PIDs - throttled to every 3 seconds
++        if self.last_socket_refresh.elapsed() >= std::time::Duration::from_secs(3) || self.sockets.is_empty() {
++            let (pid_to_ports, socket_list) = Self::collect_sockets();
++            self.cached_pid_ports = pid_to_ports;
++            self.sockets = socket_list;
++            self.last_socket_refresh = now;
++        }
+ 
+         let system_uptime = System::uptime();
+ 
+@@ -268,7 +276,7 @@ impl SystemMonitor {
+             };
+ 
+             let session_id = process.session_id().map(|s| s.as_u32());
+-            let ports = pid_to_ports.get(&pid_u32).cloned().unwrap_or_default();
++            let ports = self.cached_pid_ports.get(&pid_u32).cloned().unwrap_or_default();
+ 
+             let exe_path = process
+                 .exe()
+@@ -327,6 +335,33 @@ impl SystemMonitor {
+         self.processes = proc_list;
+     }
+ 
++    pub fn refresh_sockets(&mut self) {
++        let (pid_to_ports, socket_list) = Self::collect_sockets();
++        self.cached_pid_ports = pid_to_ports;
++        self.sockets = socket_list;
++        self.last_socket_refresh = Instant::now();
++
++        // Update process names for sockets using existing process list
++        for sock in &mut self.sockets {
++            let mut names = Vec::new();
++            for p in &sock.pids {
++                if let Some(proc) = self.processes.iter().find(|pr| pr.pid == *p) {
++                    names.push(proc.name.clone());
++                }
++            }
++            sock.process_names = names;
++        }
++
++        // Update ports on existing processes
++        for proc in &mut self.processes {
++            if let Some(ports) = self.cached_pid_ports.get(&proc.pid) {
++                proc.ports = ports.clone();
++            } else {
++                proc.ports.clear();
++            }
++        }
++    }
++
+     fn collect_sockets() -> (HashMap<u32, Vec<u16>>, Vec<NetworkSocketItem>) {
+         let mut pid_to_ports: HashMap<u32, Vec<u16>> = HashMap::new();
+         let mut socket_items = Vec::new();
+@@ -537,6 +572,35 @@ mod tests {
+         assert!(monitor.last_disk_refresh > past_disk_refresh);
+     }
+ 
++    #[test]
++    fn test_socket_refresh_throttling() {
++        let mut monitor = SystemMonitor::new();
++
++        let first_socket_refresh = monitor.last_socket_refresh;
++
++        // Calling refresh immediately should not re-query sockets
++        monitor.refresh();
++        assert_eq!(monitor.last_socket_refresh, first_socket_refresh);
++
++        // Manually simulate 4 seconds elapsed
++        monitor.last_socket_refresh = Instant::now() - Duration::from_secs(4);
++        let past_socket_refresh = monitor.last_socket_refresh;
++
++        monitor.refresh();
++        assert!(monitor.last_socket_refresh > past_socket_refresh);
++    }
++
++    #[test]
++    fn test_force_refresh_sockets() {
++        let mut monitor = SystemMonitor::new();
++        let initial_refresh = monitor.last_socket_refresh;
++
++        std::thread::sleep(Duration::from_millis(10));
++        monitor.refresh_sockets();
++
++        assert!(monitor.last_socket_refresh > initial_refresh);
++    }
++
+     #[test]
+     fn test_get_disks_info() {
+         let monitor = SystemMonitor::new();

@@ -178,12 +178,10 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
                 if let Some(proc) = app.get_selected_process() {
                     app.active_modal = Modal::ProcessDetails(proc.pid);
                 }
-            } else if app.active_tab == Tab::NetworkPorts {
-                if let Some(sock) = app.get_selected_socket() {
-                    if let Some(&pid) = sock.pids.first() {
-                        app.active_modal = Modal::ProcessDetails(pid);
-                    }
-                }
+            } else if app.active_tab == Tab::NetworkPorts
+                && let Some(&pid) = app.get_selected_socket().and_then(|s| s.pids.first())
+            {
+                app.active_modal = Modal::ProcessDetails(pid);
             }
         }
 
@@ -422,7 +420,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
         }
 
         // Dashboard Graphs / Ranking Area Clicks (y in 3..11)
-        if y >= 3 && y < 11 {
+        if (3..11).contains(&y) {
             // Click anywhere in dashboard to cycle view modes
             app.dashboard_view = app.dashboard_view.next();
             let view_name = match app.dashboard_view {
@@ -435,7 +433,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
         }
 
         // Search & Filter Bar Clicks (y in 11..14)
-        if y >= 11 && y < 14 {
+        if (11..14).contains(&y) {
             if app.active_tab == Tab::Processes {
                 app.search_active = true;
                 return true;
@@ -474,7 +472,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     app.set_net_sort(NetworkSortColumn::Protocol);
                 } else if x < 35 {
                     app.set_net_sort(NetworkSortColumn::State);
-                } else if x >= 83 && x < 95 {
+                } else if (83..95).contains(&x) {
                     app.set_net_sort(NetworkSortColumn::Pid);
                 } else if x >= 95 {
                     app.set_net_sort(NetworkSortColumn::Name);
@@ -507,10 +505,8 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
                     let target_idx = app.network_table_state.offset() + row_offset;
                     if target_idx < app.filtered_sockets.len() {
                         if app.selected_net_idx == target_idx {
-                            if let Some(sock) = app.filtered_sockets.get(target_idx) {
-                                if let Some(&pid) = sock.pids.first() {
-                                    app.active_modal = Modal::ProcessDetails(pid);
-                                }
+                            if let Some(&pid) = app.filtered_sockets.get(target_idx).and_then(|s| s.pids.first()) {
+                                app.active_modal = Modal::ProcessDetails(pid);
                             }
                         } else {
                             app.selected_net_idx = target_idx;

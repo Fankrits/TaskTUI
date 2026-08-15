@@ -48,10 +48,8 @@ fn main() -> Result<(), anyhow::Error> {
 
         // Calculate exact remaining time until next tick
         let timeout = app.tick_rate.saturating_sub(last_tick.elapsed());
-        if crossterm::event::poll(timeout)? {
-            if event::handle_events(&mut app)? {
-                needs_redraw = true;
-            }
+        if crossterm::event::poll(timeout)? && event::handle_events(&mut app)? {
+            needs_redraw = true;
         }
 
         // Tick update timer

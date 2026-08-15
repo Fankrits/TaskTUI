@@ -1,0 +1,329 @@
+diff --git a/src/event.rs b/src/event.rs
+index 25583e5..2f85acb 100644
+--- a/src/event.rs
++++ b/src/event.rs
+@@ -2,21 +2,28 @@ use crate::app::{App, DashboardView, Modal, NetworkSortColumn, SortColumn, Tab,
+ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+ use std::time::Duration;
+ 
+-pub fn handle_events(app: &mut App) -> Result<(), anyhow::Error> {
+-    if event::poll(Duration::from_millis(50))? {
++pub fn handle_events(app: &mut App) -> Result<bool, anyhow::Error> {
++    let mut handled = false;
++    while event::poll(Duration::from_millis(0))? {
+         match event::read()? {
+             Event::Key(key) => {
+                 if key.kind == KeyEventKind::Press {
+                     handle_key_event(app, key);
++                    handled = true;
+                 }
+             }
+             Event::Mouse(mouse) => {
+-                handle_mouse_event(app, mouse);
++                if handle_mouse_event(app, mouse) {
++                    handled = true;
++                }
++            }
++            Event::Resize(_, _) => {
++                handled = true;
+             }
+             _ => {}
+         }
+     }
+-    Ok(())
++    Ok(handled)
+ }
+ 
+ fn handle_key_event(app: &mut App, key: KeyEvent) {
+@@ -276,7 +283,7 @@ fn get_modal_bounds(percent_x: u16, percent_y: u16, width: u16, height: u16) ->
+     (pad_x, pad_y, w, h)
+ }
+ 
+-fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
++fn handle_mouse_event(app: &mut App, mouse: MouseEvent) -> bool {
+     let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
+     let x = mouse.column;
+     let y = mouse.row;
+@@ -285,11 +292,11 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+     match mouse.kind {
+         MouseEventKind::ScrollUp => {
+             app.prev_row();
+-            return;
++            return true;
+         }
+         MouseEventKind::ScrollDown => {
+             app.next_row();
+-            return;
++            return true;
+         }
+         _ => {}
+     }
+@@ -303,9 +310,10 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 app.selected_proc_idx = row_idx;
+                 app.process_table_state.select(Some(row_idx));
+                 app.prompt_kill_selected(false);
+-                return;
++                return true;
+             }
+         }
++        return false;
+     }
+ 
+     // 3. Left Click Handling
+@@ -319,7 +327,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 // Click outside modal -> dismiss
+                 if x < mx || x >= mx + mw || y < my || y >= my + mh {
+                     app.active_modal = Modal::None;
+-                    return;
++                    return true;
+                 }
+ 
+                 // Click on button line (near bottom of modal)
+@@ -331,8 +339,9 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                         1 => app.execute_kill(target_pid, true),  // [F] Force Kill
+                         _ => app.active_modal = Modal::None,     // [Esc] Cancel
+                     }
++                    return true;
+                 }
+-                return;
++                return false;
+             }
+             Modal::ProcessDetails(pid) => {
+                 let target_pid = *pid;
+@@ -341,7 +350,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 // Click outside modal -> dismiss
+                 if x < mx || x >= mx + mw || y < my || y >= my + mh {
+                     app.active_modal = Modal::None;
+-                    return;
++                    return true;
+                 }
+ 
+                 // Click on bottom action buttons
+@@ -360,15 +369,17 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                         // [Close]
+                         app.active_modal = Modal::None;
+                     }
++                    return true;
+                 }
+-                return;
++                return false;
+             }
+             Modal::Help => {
+                 let (mx, my, mw, mh) = get_modal_bounds(65, 70, term_width, term_height);
+                 if x < mx || x >= mx + mw || y < my || y >= my + mh || y >= my + mh.saturating_sub(3) {
+                     app.active_modal = Modal::None;
++                    return true;
+                 }
+-                return;
++                return false;
+             }
+             Modal::None => {}
+         }
+@@ -392,18 +403,21 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                     3 => app.active_tab = Tab::Help,
+                     _ => {}
+                 }
++                return true;
+             } else if x >= btn_start && x < host_start {
+                 // Clicked Play / Pause Button
+                 app.paused = !app.paused;
+                 let msg = if app.paused { "⏸ Paused Live Refresh" } else { "▶ Resumed Live Refresh" };
+                 app.add_toast(msg.to_string(), ToastKind::Info);
++                return true;
+             } else if x >= host_start {
+                 // Clicked Host block
+                 app.paused = !app.paused;
+                 let msg = if app.paused { "⏸ Paused Live Refresh" } else { "▶ Resumed Live Refresh" };
+                 app.add_toast(msg.to_string(), ToastKind::Info);
++                return true;
+             }
+-            return;
++            return false;
+         }
+ 
+         // Dashboard Graphs / Ranking Area Clicks (y in 3..11)
+@@ -416,17 +430,19 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 DashboardView::GraphsOnly => "Dashboard: System Usage Graphs",
+             };
+             app.add_toast(view_name.to_string(), ToastKind::Info);
+-            return;
++            return true;
+         }
+ 
+         // Search & Filter Bar Clicks (y in 11..14)
+         if y >= 11 && y < 14 {
+             if app.active_tab == Tab::Processes {
+                 app.search_active = true;
++                return true;
+             } else if app.active_tab == Tab::NetworkPorts {
+                 app.net_search_active = true;
++                return true;
+             }
+-            return;
++            return false;
+         }
+ 
+         // Table Header Clicks (y == 15) -> Instant Column Sorting
+@@ -448,6 +464,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 } else {
+                     app.set_sort(SortColumn::User);
+                 }
++                return true;
+             } else if app.active_tab == Tab::NetworkPorts {
+                 // Constraints: Port:10, Proto:8, State:14, LocalAddr:24, RemoteAddr:24, PID:12, Name:20
+                 if x < 13 {
+@@ -461,8 +478,9 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                 } else if x >= 95 {
+                     app.set_net_sort(NetworkSortColumn::Name);
+                 }
++                return true;
+             }
+-            return;
++            return false;
+         }
+ 
+         // Table Row Clicks (y in 16..(height - 4))
+@@ -481,6 +499,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                             app.selected_proc_idx = target_idx;
+                             app.process_table_state.select(Some(target_idx));
+                         }
++                        return true;
+                     }
+                 }
+                 Tab::NetworkPorts => {
+@@ -496,22 +515,98 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+                             app.selected_net_idx = target_idx;
+                             app.network_table_state.select(Some(target_idx));
+                         }
++                        return true;
+                     }
+                 }
+                 _ => {}
+             }
+-            return;
++            return false;
+         }
+ 
+         // Footer Clicks (y >= height - 3)
+         if y >= term_height.saturating_sub(3) {
+             if x < 12 {
+                 app.active_tab = app.active_tab.next();
++                return true;
+             } else if x >= term_width.saturating_sub(12) {
+                 app.should_quit = true;
++                return true;
+             } else if x >= term_width.saturating_sub(24) {
+                 app.active_modal = Modal::Help;
++                return true;
+             }
++            return false;
+         }
+     }
++
++    false
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
++
++    #[test]
++    fn test_mouse_scroll_triggers_redraw() {
++        let mut app = App::new();
++        let scroll_down = MouseEvent {
++            kind: MouseEventKind::ScrollDown,
++            column: 10,
++            row: 10,
++            modifiers: KeyModifiers::NONE,
++        };
++        assert!(handle_mouse_event(&mut app, scroll_down));
++
++        let scroll_up = MouseEvent {
++            kind: MouseEventKind::ScrollUp,
++            column: 10,
++            row: 10,
++            modifiers: KeyModifiers::NONE,
++        };
++        assert!(handle_mouse_event(&mut app, scroll_up));
++    }
++
++    #[test]
++    fn test_mouse_move_ignored() {
++        let mut app = App::new();
++        let mouse_move = MouseEvent {
++            kind: MouseEventKind::Moved,
++            column: 10,
++            row: 10,
++            modifiers: KeyModifiers::NONE,
++        };
++        assert!(!handle_mouse_event(&mut app, mouse_move));
++    }
++
++    #[test]
++    fn test_mouse_click_header_and_dashboard() {
++        let mut app = App::new();
++        // Click dashboard area (y=5) -> should cycle view and return true
++        let dash_click = MouseEvent {
++            kind: MouseEventKind::Down(MouseButton::Left),
++            column: 20,
++            row: 5,
++            modifiers: KeyModifiers::NONE,
++        };
++        assert!(handle_mouse_event(&mut app, dash_click));
++        assert_eq!(app.dashboard_view, DashboardView::TopRank);
++    }
++
++    #[test]
++    fn test_key_tab_navigation() {
++        let mut app = App::new();
++        assert_eq!(app.active_tab, Tab::Processes);
++        handle_key_event(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
++        assert_eq!(app.active_tab, Tab::NetworkPorts);
++    }
++
++    #[test]
++    fn test_key_quit() {
++        let mut app = App::new();
++        assert!(!app.should_quit);
++        handle_key_event(&mut app, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
++        assert!(app.should_quit);
++    }
+ }
++
+diff --git a/src/main.rs b/src/main.rs
+index 10a4fae..2d37402 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -37,18 +37,28 @@ fn main() -> Result<(), anyhow::Error> {
+     let mut app = App::new();
+ 
+     let mut last_tick = Instant::now();
++    let mut needs_redraw = true;
+ 
+     // Main App Loop
+     while !app.should_quit {
+-        terminal.draw(|f| ui::render(f, &mut app))?;
++        if needs_redraw {
++            terminal.draw(|f| ui::render(f, &mut app))?;
++            needs_redraw = false;
++        }
+ 
+-        // Handle key and mouse events
+-        event::handle_events(&mut app)?;
++        // Calculate exact remaining time until next tick
++        let timeout = app.tick_rate.saturating_sub(last_tick.elapsed());
++        if crossterm::event::poll(timeout)? {
++            if event::handle_events(&mut app)? {
++                needs_redraw = true;
++            }
++        }
+ 
+         // Tick update timer
+         if last_tick.elapsed() >= app.tick_rate {
+             app.on_tick();
+             last_tick = Instant::now();
++            needs_redraw = true;
+         }
+     }
+ 

@@ -2,6 +2,13 @@
 name = "task_tui"
 version = "0.1.0"
 edition = "2024"
+authors = ["Fankrits <fankritsadajra@gmail.com>"]
+description = "A blazing-fast, lightweight, and modern terminal task manager and system monitor built with Rust and Ratatui."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Fankrits/TaskTUI"
+keywords = ["tui", "system-monitor", "task-manager", "process-viewer", "ratatui"]
+categories = ["command-line-utilities", "system::monitoring"]
 
 [dependencies]
 anyhow = "1.0.104"
